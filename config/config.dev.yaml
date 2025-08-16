@@ -1,0 +1,38 @@
+server:
+  port: "8080"
+  mode: "debug"
+
+mysql_main:
+  host: "127.0.0.1"
+  port: 3306
+  database: "wht_pay"
+  username: "root"
+  password: "root"
+  charset: "utf8mb4"
+  maxIdleConns: 5
+  maxOpenConns: 20
+
+mysql_order:
+  host: "127.0.0.1"
+  port: 3306
+  database: "wht_order"
+  username: "root"
+  password: "root"
+  charset: "utf8mb4"
+  maxIdleConns: 5
+  maxOpenConns: 20
+
+rabbitmq:
+  url: "amqp://guest:guest@127.0.0.1:5672/"
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+security:
+  hmacSecret: "demo_hmac_secret"
+
+order:
+  shardsPerMonth: 4
+  createTimeoutSec: 3
