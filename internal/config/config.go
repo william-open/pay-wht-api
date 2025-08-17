@@ -38,6 +38,10 @@ type OrderCfg struct {
 	CreateTimeoutSec int `mapstructure:"createTimeoutSec"`
 }
 
+type UpstreamCfg struct {
+	ApiUrl string `mapstructure:"apiUrl"`
+}
+
 type Root struct {
 	Server     ServerCfg   `mapstructure:"server"`
 	MysqlMain  MysqlCfg    `mapstructure:"mysql_main"`
@@ -46,6 +50,7 @@ type Root struct {
 	Redis      RedisCfg    `mapstructure:"redis"`
 	Security   SecurityCfg `mapstructure:"security"`
 	Order      OrderCfg    `mapstructure:"order"`
+	Upstream   UpstreamCfg `mapstructure:"upstream"`
 }
 
 var C Root

@@ -36,3 +36,7 @@ security:
 order:
   shardsPerMonth: 4
   createTimeoutSec: 3
+
+# 上游服务PHP接口地址
+upstream:
+  apiUrl: ""

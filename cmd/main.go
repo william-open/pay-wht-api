@@ -35,15 +35,17 @@ func main() {
 	}
 	r := gin.New()
 	// 设置可信代理 IP（如本地或内网）
-	r.SetTrustedProxies([]string{"127.0.0.1", "192.168.0.0/16"})
+	err := r.SetTrustedProxies([]string{"127.0.0.1", "192.168.0.0/16"})
+	if err != nil {
+		log.Fatal(err)
+	}
 	r.Use(middleware.Recover())
 
 	v1 := r.Group("/api/v1")
 	{
 		oh := handler.NewOrderHandler()
-		v1.POST("/orders", middleware.AuthHMAC(), oh.Create)
+		v1.POST("/orders", middleware.AuthMD5Sign(), oh.Create)
 		v1.GET("/orders/:id", oh.Get)
-		v1.GET("/orders", oh.List)
 	}
 
 	addr := ":" + config.C.Server.Port

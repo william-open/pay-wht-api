@@ -2,17 +2,15 @@ package ordermodel
 
 import "time"
 
-type UpTx struct {
-	TxID        uint64    `gorm:"column:tx_id;primaryKey"`
+type UpstreamTx struct {
+	UpOrderId   uint64    `gorm:"column:up_order_id;primaryKey"`
 	OrderID     uint64    `gorm:"column:order_id"`
-	MerchantID  uint64    `gorm:"column:merchant_id"`
-	ChannelID   uint64    `gorm:"column:channel_id"`
-	ChannelTxID *string   `gorm:"column:channel_tx_id"`
-	Type        int8      `gorm:"column:type"`
+	MerchantID  uint64    `gorm:"column:m_id"`
+	SupplierId  uint64    `gorm:"column:supplier_id"`
+	UpOrderNo   string    `gorm:"column:up_order_no"`
 	Amount      string    `gorm:"column:amount"`
 	Currency    string    `gorm:"column:currency"`
 	Status      int8      `gorm:"column:status"`
-	Detail      any       `gorm:"column:detail"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	CreateTime  time.Time `gorm:"column:create_time"`
+	UpdateTiime time.Time `gorm:"column:update_tiime"`
 }

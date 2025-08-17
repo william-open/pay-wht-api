@@ -3,87 +3,162 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
+	"wht-order-api/internal/utils"
 
 	"wht-order-api/internal/dal"
+	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/idgen"
 	ordermodel "wht-order-api/internal/model/order"
-	"wht-order-api/internal/mq"
-	"wht-order-api/internal/repo"
-	"wht-order-api/internal/shard"
 )
 
 type OrderService struct {
-	mainRepo  *repo.MainRepo
-	orderRepo *repo.OrderRepo
+	mainDao  *dao.MainDao
+	orderDao *dao.OrderDao
 }
 
 func NewOrderService() *OrderService {
-	return &OrderService{mainRepo: &repo.MainRepo{}, orderRepo: &repo.OrderRepo{}}
+	return &OrderService{
+		mainDao:  &dao.MainDao{},
+		orderDao: &dao.OrderDao{},
+	}
 }
 
-func (s *OrderService) Create(req dto.CreateOrderReq) (uint64, error) {
+// 分片表名生成器：p_order_{YYYYMM}_p{orderID % 4}
+func getOrderTable(base string, orderID uint64, t time.Time) string {
+	month := t.Format("200601")
+	shard := orderID % 4
+	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
+}
+
+func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, error) {
+	var response dto.CreateOrderResp
 	// 1) 主库校验
-	merchant, err := s.mainRepo.GetMerchant(req.MerchantID)
+	merchant, err := s.mainDao.GetMerchant(req.MerchantNo)
 	if err != nil || merchant == nil || merchant.Status != 1 {
-		return 0, errors.New("merchant invalid")
+		return response, errors.New("merchant invalid")
 	}
-	channel, err := s.mainRepo.GetChannel(req.ChannelID)
-	if err != nil || channel == nil || channel.Status != 1 {
-		return 0, errors.New("channel invalid")
+	amount, err := strconv.ParseFloat(req.Amount, 64)
+	if err != nil {
+		return response, errors.New("金额格式错误")
+	}
+	// 1) 选择可用上游通道
+	channel, err := s.SelectPaymentChannel(uint(merchant.MerchantID), amount, req.PayType, req.Currency)
+	if err != nil || channel.Coding == "" {
+		return response, errors.New("没有可用通道")
 	}
 
 	now := time.Now()
+	// 2) 全局订单ID
 	oid := idgen.New()
-	table := shard.Table("merchant_order", now, oid)
+	table := getOrderTable("p_order", oid, now)
 
-	// 2) 幂等
-	if exist, _ := s.orderRepo.GetByMerchantNo(table, req.MerchantID, req.MerchantOrdNo); exist != nil {
-		return exist.OrderID, nil
+	// 3) 幂等校验（建议用唯一索引保障）
+	if exist, _ := s.orderDao.GetByMerchantNo(table, merchant.MerchantID, req.TranFlow); exist != nil {
+		return response, nil
 	}
 
-	// 3) 插入
+	// 4) 调用上游下单接口生成支付链接
+
+	upOrderNo, payUrl, err := CallUpstreamService(req, channel)
+	if err != nil {
+		fmt.Println("请求上游供应商失败:", err)
+		return response, errors.New("请求上游供应商失败")
+	}
+	response.Yul1 = payUrl
+	response.PaySerialNo = string(oid)
+	response.TranFlow = req.TranFlow
+	response.SysTime = time.Now().String()
+	response.Amount = req.Amount
+	//var upRespData dto.UpstreamResponse
+	//if err := json.Unmarshal([]byte(upResp), &upRespData); err != nil {
+	//	fmt.Println("解析失败:", err)
+	//	return 0, errors.New("请求上游供应商,解析失败")
+	//}
+	//upRespData.RawResponse = upResp // 保留原始响应，便于日志追踪
+
+	// 5) 订单结算计算
+	//var agentPct, agentFixed float64 = 0, 0
+	//if merchant.PId > 0 {
+	//	var agentMerchant dto.QueryAgentMerchant
+	//	agentMerchant.AId = int64(merchant.PId)
+	//	agentMerchant.MId = int64(merchant.MerchantID)
+	//	agentMerchant.SysChannelID = channel.SysChannelID
+	//	agentMerchant.UpChannelID = channel.UpChannelID
+	//	agentMerchant.Currency = channel.Currency
+	//	agentInfo, err := s.mainDao.GetAgentMerchant(agentMerchant)
+	//	if err != nil && agentInfo != nil && agentInfo.Status == 1 {
+	//		agentPct = agentInfo.DefaultRate
+	//		agentFixed = agentInfo.SingleFee
+	//	}
+	//}
+	// 订单金额转化浮点数
+	orderAmount, err := strconv.ParseFloat(req.Amount, 64)
+	if err != nil {
+		return response, errors.New("无效的浮点数")
+	}
+	//settle := utils.Calculate(orderAmount, channel.MDefaultRate, channel.MSingleFee, agentPct, agentFixed, channel.UpDefaultRate, channel.UpSingleFee, "agent_from_platform")
+
+	// 6) 构造订单模型
 	m := &ordermodel.MerchantOrder{
-		OrderID:       oid,
-		MerchantID:    req.MerchantID,
-		MerchantOrdNo: req.MerchantOrdNo,
-		Amount:        req.Amount,
-		Currency:      req.Currency,
-		PayMethod:     req.PayMethod,
-		Status:        0,
-		NotifyURL:     req.NotifyURL,
-		ChannelID:     &req.ChannelID,
-		Ext:           req.Ext,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	if err := s.orderRepo.Insert(table, m); err != nil {
-		return 0, err
+		OrderID:     oid,
+		MID:         merchant.MerchantID,
+		MOrderID:    req.TranFlow,
+		Amount:      orderAmount,
+		Currency:    req.Currency,
+		SupplierID:  channel.UpstreamId,
+		Status:      0,
+		NotifyURL:   req.NotifyUrl,
+		ReturnURL:   req.RedirectUrl,
+		ChannelID:   channel.SysChannelID,
+		ChannelCode: &channel.Coding,
+		Title:       req.ProductInfo,
+		PayEmail:    req.PayEmail,
+		PayPhone:    req.PayPhone,
 	}
 
-	// 4) 缓存到 redis（短期）
+	// 7) 插入数据库
+	if err := s.orderDao.Insert(table, m); err != nil {
+		return response, err
+	}
+
+	txId := idgen.New()
+	txTable := getOrderTable("p_up_order", txId, time.Now())
+	// 5. 写入上游流水
+	tx := &ordermodel.UpstreamTx{
+		OrderID:    txId,
+		MerchantID: merchant.MerchantID,
+		SupplierId: uint64(channel.UpstreamId),
+		Amount:     req.Amount,
+		Currency:   req.Currency,
+		Status:     0,
+		UpOrderNo:  upOrderNo,
+	}
+
+	// 7) 插入数据库
+	if err := s.orderDao.InsertTx(txTable, tx); err != nil {
+		return response, err
+	}
+
+	// 9) 缓存到 Redis
 	cacheKey := "order:" + strconv.FormatUint(oid, 10)
-	_ = dal.RedisClient.Set(dal.RedisCtx, cacheKey, mapToJSON(m), 10*time.Minute).Err()
+	_ = dal.RedisClient.Set(dal.RedisCtx, cacheKey, utils.MapToJSON(m), 10*time.Minute).Err()
 
-	// 5) 发布 MQ 事件
-	evt := mq.OrderCreatedEvent{
-		OrderID: oid, MerchantID: req.MerchantID, MerchantOrdNo: req.MerchantOrdNo,
-		Amount: req.Amount, Currency: req.Currency, PayMethod: req.PayMethod, CreatedAt: now.Unix(),
-	}
-	_ = mq.PublishOrderCreated(evt)
-
-	return oid, nil
-}
-
-func mapToJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
+	// 10) 发布 MQ 事件
+	//evt := mq.OrderCreatedEvent{
+	//	OrderID: oid, MerchantID: merchant.MerchantID, MerchantOrdNo: req.TranFlow,
+	//	Amount: req.Amount, Currency: req.Currency, PayMethod: "", CreatedAt: now.Unix(),
+	//}
+	//_ = mq.PublishOrderCreated(evt)
+	response.Code = string(0)
+	return response, nil
 }
 
 func (s *OrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
-	// 优先读 redis
+	// 优先读 Redis
 	cacheKey := "order:" + strconv.FormatUint(id, 10)
 	if sjson, err := dal.RedisClient.Get(dal.RedisCtx, cacheKey).Result(); err == nil {
 		var mo ordermodel.MerchantOrder
@@ -91,7 +166,35 @@ func (s *OrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
 			return &mo, nil
 		}
 	}
-	// fallback DB (current month for demo)
-	table := shard.Table("merchant_order", time.Now(), id)
-	return s.orderRepo.GetByID(table, id)
+
+	// fallback DB：按 ID 推导分片表
+	table := getOrderTable("p_order", id, time.Now())
+	return s.orderDao.GetByID(table, id)
+}
+
+// SelectPaymentChannel 根据商户和订单金额选择可用通道
+func (s *OrderService) SelectPaymentChannel(merchantID uint, amount float64, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
+
+	var payRouteList []dto.PaymentChannelVo
+	// 查询商户路由
+	mainDao := &dao.MainDao{}
+	payRouteList, _ = mainDao.SelectPaymentChannel(merchantID, channelCode, currency)
+	if len(payRouteList) < 1 {
+		return nil, errors.New("没有可用通道")
+	}
+
+	for _, route := range payRouteList {
+		var channel dto.PaymentChannelVo
+
+		channel = route
+		// 0. 检查金额是否符合通道 orderRange
+		if !utils.MatchOrderRange(amount, channel.OrderRange) {
+			continue
+		}
+
+		// 满足条件，返回该通道
+		return &channel, nil
+	}
+
+	return nil, fmt.Errorf("no available payment channel")
 }

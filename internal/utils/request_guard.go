@@ -1,0 +1,36 @@
+package utils
+
+import (
+	"strconv"
+	"time"
+)
+
+// 改用 Unix 解析方式
+func ParseTimestamp(tsStr string) (time.Time, error) {
+	sec, err := strconv.ParseInt(tsStr, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(sec, 0), nil
+}
+
+// 当前时间与请求时间差在合法窗口内（单位秒）
+func IsTimestampValid(ts time.Time, window time.Duration) bool {
+	now := time.Now()
+	diff := now.Sub(ts)
+	return diff >= 0 && diff <= window
+}
+
+// 检查 nonce 格式
+func IsValidNonce(nonce string) bool {
+	// 最少8位，只允许数字字母
+	if len(nonce) < 8 {
+		return false
+	}
+	for _, r := range nonce {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}

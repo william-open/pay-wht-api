@@ -1,4 +1,4 @@
-package repo
+package dao
 
 import (
 	"errors"
@@ -8,13 +8,13 @@ import (
 	ordermodel "wht-order-api/internal/model/order"
 )
 
-type OrderRepo struct{}
+type OrderDao struct{}
 
-func (r *OrderRepo) Insert(table string, o *ordermodel.MerchantOrder) error {
+func (r *OrderDao) Insert(table string, o *ordermodel.MerchantOrder) error {
 	return dal.OrderDB.Table(table).Create(o).Error
 }
 
-func (r *OrderRepo) GetByID(table string, id uint64) (*ordermodel.MerchantOrder, error) {
+func (r *OrderDao) GetByID(table string, id uint64) (*ordermodel.MerchantOrder, error) {
 	var m ordermodel.MerchantOrder
 	err := dal.OrderDB.Table(table).Where("order_id = ?", id).First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -23,16 +23,16 @@ func (r *OrderRepo) GetByID(table string, id uint64) (*ordermodel.MerchantOrder,
 	return &m, err
 }
 
-func (r *OrderRepo) GetByMerchantNo(table string, mid uint64, mNo string) (*ordermodel.MerchantOrder, error) {
+func (r *OrderDao) GetByMerchantNo(table string, mid uint64, mNo string) (*ordermodel.MerchantOrder, error) {
 	var m ordermodel.MerchantOrder
-	err := dal.OrderDB.Table(table).Where("merchant_id=? AND merchant_ord_no=?", mid, mNo).First(&m).Error
+	err := dal.OrderDB.Table(table).Where("m_id=? AND m_order_id=?", mid, mNo).First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	return &m, err
 }
 
-func (r *OrderRepo) ListInTables(tables []string, kw string, status *int8, limit, offset int) ([]ordermodel.MerchantOrder, int64, error) {
+func (r *OrderDao) ListInTables(tables []string, kw string, status *int8, limit, offset int) ([]ordermodel.MerchantOrder, int64, error) {
 	var out []ordermodel.MerchantOrder
 	var total int64
 	for _, t := range tables {
@@ -56,4 +56,8 @@ func (r *OrderRepo) ListInTables(tables []string, kw string, status *int8, limit
 		out = append(out, tmp...)
 	}
 	return out, total, nil
+}
+
+func (r *OrderDao) InsertTx(table string, o *ordermodel.UpstreamTx) error {
+	return dal.OrderDB.Table(table).Create(o).Error
 }
