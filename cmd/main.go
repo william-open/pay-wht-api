@@ -34,6 +34,8 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
+	// 设置可信代理 IP（如本地或内网）
+	r.SetTrustedProxies([]string{"127.0.0.1", "192.168.0.0/16"})
 	r.Use(middleware.Recover())
 
 	v1 := r.Group("/api/v1")

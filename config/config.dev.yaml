@@ -3,21 +3,21 @@ server:
   mode: "debug"
 
 mysql_main:
-  host: "127.0.0.1"
-  port: 3306
+  host: "103.145.190.207"
+  port: 33806
   database: "wht_pay"
-  username: "root"
-  password: "root"
+  username: "wht_pay"
+  password: "7npGfyWibhrX8BYx"
   charset: "utf8mb4"
   maxIdleConns: 5
   maxOpenConns: 20
 
 mysql_order:
-  host: "127.0.0.1"
-  port: 3306
+  host: "103.145.190.207"
+  port: 33806
   database: "wht_order"
-  username: "root"
-  password: "root"
+  username: "wht_order"
+  password: "7bP3PCTcnKXjcHEG"
   charset: "utf8mb4"
   maxIdleConns: 5
   maxOpenConns: 20
@@ -27,7 +27,7 @@ rabbitmq:
 
 redis:
   addr: "127.0.0.1:6379"
-  password: ""
+  password: "Lmx@790816"
   db: 0
 
 security:
