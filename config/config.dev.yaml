@@ -39,4 +39,5 @@ order:
 
 # 上游服务PHP接口地址
 upstream:
-  receiveApiUrl: "http://up.test.8dacai.cyou/order/receive"
+#  receiveApiUrl: "http://up.test.8dacai.cyou/order/receive"
+  receiveApiUrl: "http://localhost:9501/order/receive"

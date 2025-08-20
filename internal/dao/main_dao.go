@@ -16,6 +16,14 @@ func (r *MainDao) GetMerchant(mid string) (*mainmodel.Merchant, error) {
 	return &m, nil
 }
 
+func (r *MainDao) GetMerchantId(mid string) (*mainmodel.Merchant, error) {
+	var m mainmodel.Merchant
+	if err := dal.MainDB.Where("m_id=?", mid).First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 func (r *MainDao) GetChannel(cid uint64) (*mainmodel.Channel, error) {
 	var ch mainmodel.Channel
 	if err := dal.MainDB.Where("channel_id=?", cid).First(&ch).Error; err != nil {

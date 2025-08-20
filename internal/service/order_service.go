@@ -125,7 +125,7 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	// 5. 写入上游流水
 	tx := &ordermodel.UpstreamTx{
 		OrderID:    oid,
-		MerchantID: merchant.MerchantID,
+		MerchantID: strconv.FormatUint(merchant.MerchantID, 10),
 		SupplierId: uint64(channel.UpstreamId),
 		Amount:     req.Amount,
 		Currency:   req.Currency,
