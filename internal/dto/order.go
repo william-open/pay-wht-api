@@ -11,7 +11,7 @@ type CreateOrderReq struct {
 	PayType      string `json:"pay_type" binding:"required"`        //通道编码
 	NotifyUrl    string `json:"notify_url" binding:"omitempty,url"` //回调地址
 	RedirectUrl  string `json:"redirect_url"`                       //成功跳转地址
-	Currency     string `json:"currency" binding:"required,len=3"`  //货币符号
+	Currency     string `json:"currency"`                           //货币符号
 	ProductInfo  string `json:"product_info" binding:"required"`    //订单标题/内容
 	AccNo        string `json:"acc_no"`                             // 付款人账号
 	AccName      string `json:"acc_name"`                           //付款人姓名
@@ -19,7 +19,7 @@ type CreateOrderReq struct {
 	PayPhone     string `json:"pay_phone"`                          //付款人手机号
 	BankCode     string `json:"bank_code"`                          //付款人银行名
 	BankName     string `json:"bank_name"`                          //付款人银行名
-	Sign         string `json:"sign" binding:"sign"`                //MD5 签名 32大写
+	Sign         string `json:"sign" binding:"required"`            //MD5 签名 32大写
 }
 
 // CreateOrderResp 创建订单返回数据
@@ -63,6 +63,9 @@ type PaymentChannelVo struct {
 	UpChannelID   int64   `json:"upChannelId"`  // 上游通道编码ID
 	UpstreamId    int64   `json:"upstreamId"`   // 上游ID
 	Currency      string  `json:"currency"`     // 货币符号
+	UpAccount     string  `json:"upAccount"`    // 上游商户号
+	ReceivingKey  string  `json:"receivingKey"` // 上游代收密钥
+	ChannelCode   string  `json:"channelCode"`  // 上游通道对接编码
 }
 
 // QueryAgentMerchant 查询代理商户信息
@@ -115,4 +118,40 @@ type NotifyMerchantPayload struct {
 	MerchantNo  string  `json:"merchantNo"`
 	Sign        string  `json:"sign"`
 	Amount      float64 `json:"amount"`
+}
+
+// 请求上游供应商参数 UpstreamRequest
+type UpstreamRequest struct {
+	MchNo       string `json:"mchNo" binding:"required"`          //商户号
+	ApiKey      string `json:"apiKey" binding:"required"`         //商户密钥
+	MchOrderId  string `json:"mchOrderId" binding:"required"`     //商家订单号
+	Amount      string `json:"amount" binding:"required"`         //交易金额
+	PayType     string `json:"payType" binding:"required"`        //通道编码/支付类型
+	NotifyUrl   string `json:"notifyUrl" binding:"omitempty,url"` //回调地址
+	RedirectUrl string `json:"redirectUrl"`                       //成功跳转地址
+	Currency    string `json:"currency" binding:"required,len=3"` //货币符号
+	ProductInfo string `json:"productInfo" binding:"required"`    //订单标题/内容
+	ProviderKey string `json:"providerKey" binding:"required"`    //上游供应商对接编码
+	AccNo       string `json:"accNo"`                             //付款人账号
+	AccName     string `json:"accName"`                           //付款人姓名
+	PayEmail    string `json:"payEmail"`                          //付款人邮箱
+	PayPhone    string `json:"payPhone"`                          //付款人手机号
+	BankCode    string `json:"bankCode"`                          //付款人银行编码
+	BankName    string `json:"bankName"`                          //付款人银行名
+}
+
+// PayWayVo 系统支付通道信息
+type PayWayVo struct {
+	Id       uint64 `json:"Id"`
+	Title    string `json:"title"`
+	Currency string `json:"currency"`
+	Coding   string `json:"coding"`
+	Type     int8   `json:"type"`
+	Status   int8   `json:"status"`
+}
+
+type UpdateUpTxVo struct {
+	UpOrderId  uint64    `gorm:"column:up_order_id;primaryKey"`
+	UpOrderNo  string    `gorm:"column:up_order_no"`
+	UpdateTime time.Time `gorm:"column:update_time"`
 }

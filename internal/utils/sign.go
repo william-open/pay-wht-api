@@ -30,8 +30,11 @@ func GenerateSign(params map[string]string, secretKey string) string {
 	sb.WriteString("&key=")
 	sb.WriteString(secretKey)
 
+	//log.Printf("签名query字符串:%v", sb.String())
 	hash := md5.Sum([]byte(sb.String()))
-	return strings.ToUpper(hex.EncodeToString(hash[:]))
+	signStr := strings.ToUpper(hex.EncodeToString(hash[:]))
+	//log.Printf("签名值: %v", signStr)
+	return signStr
 }
 
 // VerifySign 验证签名是否匹配

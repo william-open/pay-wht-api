@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"bytes"
+	"log"
+	"runtime/debug"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +13,8 @@ func Recover() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if r := recover(); r != nil {
+				log.Printf("panic recovered: %v\n", r)
+				debug.PrintStack() // 打印完整堆栈，包含文件名和行号
 				c.JSON(500, gin.H{"code": 500, "msg": "internal error"})
 				c.Abort()
 			}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -17,6 +18,7 @@ func HttpPostJson(url string, data interface{}) (string, error) {
 		return "", fmt.Errorf("marshal json error: %v", err)
 	}
 
+	log.Printf("请求上游URL: %v,请求上游参数: %v", url, string(jsonData))
 	// 创建 HTTP 客户端（超时 10s）
 	client := &http.Client{Timeout: 10 * time.Second}
 
@@ -46,4 +48,23 @@ func HttpPostJson(url string, data interface{}) (string, error) {
 	}
 
 	return string(body), nil
+}
+
+func CheckUpstreamHealth(url string) error {
+	log.Printf("请求检测地址: %v", url)
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("状态码异常: %d", resp.StatusCode)
+	}
+	return nil
 }

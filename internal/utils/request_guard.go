@@ -5,13 +5,15 @@ import (
 	"time"
 )
 
-// 改用 Unix 解析方式
+// 将毫秒转换为秒 + 纳秒
 func ParseTimestamp(tsStr string) (time.Time, error) {
-	sec, err := strconv.ParseInt(tsStr, 10, 64)
+	ms, err := strconv.ParseInt(tsStr, 10, 64)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return time.Unix(sec, 0), nil
+	sec := ms / 1000
+	nsec := (ms % 1000) * 1e6
+	return time.Unix(sec, nsec), nil
 }
 
 // 当前时间与请求时间差在合法窗口内（单位秒）

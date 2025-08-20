@@ -2,6 +2,7 @@ package dao
 
 import (
 	"errors"
+	"wht-order-api/internal/dto"
 
 	"gorm.io/gorm"
 	"wht-order-api/internal/dal"
@@ -60,4 +61,8 @@ func (r *OrderDao) ListInTables(tables []string, kw string, status *int8, limit,
 
 func (r *OrderDao) InsertTx(table string, o *ordermodel.UpstreamTx) error {
 	return dal.OrderDB.Table(table).Create(o).Error
+}
+
+func (r *OrderDao) UpdateUpTx(table string, o dto.UpdateUpTxVo) error {
+	return dal.OrderDB.Table(table).Where("up_order_id = ?", o.UpOrderId).Updates(o).Error
 }

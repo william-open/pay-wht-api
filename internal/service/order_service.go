@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 	"wht-order-api/internal/utils"
@@ -45,8 +46,14 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	if err != nil {
 		return response, errors.New("金额格式错误")
 	}
+	// 查询系统通道是否有效
+	channelDtail, err := s.QuerySysChannel(req.PayType)
+	if err != nil {
+		return response, errors.New("通道不存在")
+	}
+	log.Printf("请求通道编码: %v", req.PayType)
 	// 1) 选择可用上游通道
-	channel, err := s.SelectPaymentChannel(uint(merchant.MerchantID), amount, req.PayType, req.Currency)
+	channel, err := s.SelectPaymentChannel(uint(merchant.MerchantID), amount, req.PayType, channelDtail.Currency)
 	if err != nil || channel.Coding == "" {
 		return response, errors.New("没有可用通道")
 	}
@@ -61,18 +68,6 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 		return response, nil
 	}
 
-	// 4) 调用上游下单接口生成支付链接
-
-	upOrderNo, payUrl, err := CallUpstreamService(req, channel)
-	if err != nil {
-		fmt.Println("请求上游供应商失败:", err)
-		return response, errors.New("请求上游供应商失败")
-	}
-	response.Yul1 = payUrl
-	response.PaySerialNo = string(oid)
-	response.TranFlow = req.TranFlow
-	response.SysTime = time.Now().String()
-	response.Amount = req.Amount
 	//var upRespData dto.UpstreamResponse
 	//if err := json.Unmarshal([]byte(upResp), &upRespData); err != nil {
 	//	fmt.Println("解析失败:", err)
@@ -129,19 +124,63 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	txTable := getOrderTable("p_up_order", txId, time.Now())
 	// 5. 写入上游流水
 	tx := &ordermodel.UpstreamTx{
-		OrderID:    txId,
+		OrderID:    oid,
 		MerchantID: merchant.MerchantID,
 		SupplierId: uint64(channel.UpstreamId),
 		Amount:     req.Amount,
 		Currency:   req.Currency,
 		Status:     0,
-		UpOrderNo:  upOrderNo,
+		UpOrderId:  txId,
 	}
 
 	// 7) 插入数据库
 	if err := s.orderDao.InsertTx(txTable, tx); err != nil {
 		return response, err
 	}
+
+	// 4) 调用上游下单接口生成支付链接
+
+	var upstreamRequest dto.UpstreamRequest
+	upstreamRequest.Currency = req.Currency
+	upstreamRequest.Amount = req.Amount
+	upstreamRequest.RedirectUrl = req.RedirectUrl
+	upstreamRequest.ProductInfo = req.ProductInfo
+	upstreamRequest.PayType = req.PayType
+	upstreamRequest.Currency = channel.Currency
+	upstreamRequest.ProviderKey = channel.ChannelCode
+	upstreamRequest.MchOrderId = strconv.FormatUint(txId, 10)
+	upstreamRequest.ApiKey = merchant.ApiKey
+	upstreamRequest.MchNo = channel.UpAccount
+	upstreamRequest.NotifyUrl = req.NotifyUrl
+
+	mOrderId, upOrderNo, payUrl, err := CallUpstreamService(upstreamRequest, channel)
+	if err != nil {
+		fmt.Println("请求上游供应商失败:", err.Error())
+		return response, errors.New("请求上游供应商失败")
+	}
+	// 更新上游交易订单信息
+	var upTx dto.UpdateUpTxVo
+
+	var mOrderIdUint uint64
+	if mOrderId != "" {
+		mOrderIdUint, err = strconv.ParseUint(mOrderId, 10, 64)
+		if err != nil {
+			log.Printf("上游订单号转换失败: %v", err)
+			return response, errors.New("上游订单号转换失败")
+		}
+	}
+
+	upTx.UpOrderId = mOrderIdUint
+	upTx.UpOrderNo = upOrderNo
+	if err := s.orderDao.UpdateUpTx(txTable, upTx); err != nil {
+		return response, err
+	}
+
+	response.Yul1 = payUrl
+	response.PaySerialNo = string(oid) //订单表编号
+	response.TranFlow = req.TranFlow
+	response.SysTime = time.Now().String()
+	response.Amount = req.Amount
 
 	// 9) 缓存到 Redis
 	cacheKey := "order:" + strconv.FormatUint(oid, 10)
@@ -197,4 +236,18 @@ func (s *OrderService) SelectPaymentChannel(merchantID uint, amount float64, cha
 	}
 
 	return nil, fmt.Errorf("no available payment channel")
+}
+
+// SelectPaymentChannel 查询系统通道编码
+func (s *OrderService) QuerySysChannel(channelCode string) (dto.PayWayVo, error) {
+
+	var payWayDetail dto.PayWayVo
+	// 查询商户路由
+	mainDao := &dao.MainDao{}
+	payWayDetail, err := mainDao.GetSysChannel(channelCode)
+	if err != nil {
+		return payWayDetail, errors.New("通道编码不存在")
+	}
+
+	return payWayDetail, nil
 }

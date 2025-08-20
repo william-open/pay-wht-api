@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"log"
 	"net/http"
 	"strconv"
 	"wht-order-api/internal/dto"
@@ -13,18 +14,31 @@ type OrderHandler struct{ svc *service.OrderService }
 func NewOrderHandler() *OrderHandler { return &OrderHandler{svc: service.NewOrderService()} }
 
 func (h *OrderHandler) Create(c *gin.Context) {
-	var req dto.CreateOrderReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
-		return
-	}
-	response, err := h.svc.Create(req)
-	if err != nil {
-		c.JSON(400, gin.H{"code": 400, "msg": err.Error()})
+	// 从中间件获取 pay_request 数据
+	val, exists := c.Get("pay_request")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "pay_request not found"})
 		return
 	}
 
-	c.JSON(200, response)
+	// 类型断言为 dto.CreateOrderReq
+	req, ok := val.(dto.CreateOrderReq)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid pay_request type"})
+		return
+	}
+
+	// 打印调试日志（可选）
+	log.Printf("收到数据: %+v\n", req)
+
+	// 调用服务层处理
+	response, err := h.svc.Create(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *OrderHandler) Get(c *gin.Context) {

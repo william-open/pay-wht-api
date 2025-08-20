@@ -39,7 +39,7 @@ type OrderCfg struct {
 }
 
 type UpstreamCfg struct {
-	ApiUrl string `mapstructure:"apiUrl"`
+	ReceiveApiUrl string `mapstructure:"receiveApiUrl"`
 }
 
 type Root struct {

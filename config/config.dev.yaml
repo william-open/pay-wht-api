@@ -39,4 +39,4 @@ order:
 
 # 上游服务PHP接口地址
 upstream:
-  apiUrl: ""
+  receiveApiUrl: "http://up.test.8dacai.cyou/order/receive"
