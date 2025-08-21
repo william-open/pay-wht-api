@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jinzhu/copier"
 	"log"
 	"strconv"
 	"time"
@@ -35,6 +36,7 @@ func getOrderTable(base string, orderID uint64, t time.Time) string {
 	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
 }
 
+// Create 处理代收订单下单业务逻辑
 func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, error) {
 	var response dto.CreateOrderResp
 	// 1) 主库校验
@@ -76,43 +78,57 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	//upRespData.RawResponse = upResp // 保留原始响应，便于日志追踪
 
 	// 5) 订单结算计算
-	//var agentPct, agentFixed float64 = 0, 0
-	//if merchant.PId > 0 {
-	//	var agentMerchant dto.QueryAgentMerchant
-	//	agentMerchant.AId = int64(merchant.PId)
-	//	agentMerchant.MId = int64(merchant.MerchantID)
-	//	agentMerchant.SysChannelID = channel.SysChannelID
-	//	agentMerchant.UpChannelID = channel.UpChannelID
-	//	agentMerchant.Currency = channel.Currency
-	//	agentInfo, err := s.mainDao.GetAgentMerchant(agentMerchant)
-	//	if err != nil && agentInfo != nil && agentInfo.Status == 1 {
-	//		agentPct = agentInfo.DefaultRate
-	//		agentFixed = agentInfo.SingleFee
-	//	}
-	//}
+	var agentPct, agentFixed float64 = 0, 0
+	if merchant.PId > 0 {
+		var agentMerchant dto.QueryAgentMerchant
+		agentMerchant.AId = int64(merchant.PId)
+		agentMerchant.MId = int64(merchant.MerchantID)
+		agentMerchant.SysChannelID = channel.SysChannelID
+		agentMerchant.UpChannelID = channel.UpChannelId
+		agentMerchant.Currency = channel.Currency
+		agentInfo, err := s.mainDao.GetAgentMerchant(agentMerchant)
+		if err != nil && agentInfo != nil && agentInfo.Status == 1 {
+			agentPct = agentInfo.DefaultRate
+			agentFixed = agentInfo.SingleFee
+		}
+	}
 	// 订单金额转化浮点数
 	orderAmount, err := strconv.ParseFloat(req.Amount, 64)
 	if err != nil {
 		return response, errors.New("无效的浮点数")
 	}
-	//settle := utils.Calculate(orderAmount, channel.MDefaultRate, channel.MSingleFee, agentPct, agentFixed, channel.UpDefaultRate, channel.UpSingleFee, "agent_from_platform")
+	settle := utils.Calculate(orderAmount, channel.MDefaultRate, channel.MSingleFee, agentPct, agentFixed, channel.UpDefaultRate, channel.UpSingleFee, "agent_from_platform", channel.Currency)
+	var orderSettle dto.SettlementResult
+	_ = copier.Copy(&orderSettle, &settle)
 
 	// 6) 构造订单模型
 	m := &ordermodel.MerchantOrder{
-		OrderID:     oid,
-		MID:         merchant.MerchantID,
-		MOrderID:    req.TranFlow,
-		Amount:      orderAmount,
-		Currency:    req.Currency,
-		SupplierID:  channel.UpstreamId,
-		Status:      0,
-		NotifyURL:   req.NotifyUrl,
-		ReturnURL:   req.RedirectUrl,
-		ChannelID:   channel.SysChannelID,
-		ChannelCode: &channel.Coding,
-		Title:       req.ProductInfo,
-		PayEmail:    req.PayEmail,
-		PayPhone:    req.PayPhone,
+		OrderID:        oid,
+		MID:            merchant.MerchantID,
+		MOrderID:       req.TranFlow,
+		Amount:         orderAmount,
+		Currency:       channel.Currency,
+		SupplierID:     channel.UpstreamId,
+		Status:         0,
+		NotifyURL:      req.NotifyUrl,
+		ReturnURL:      req.RedirectUrl,
+		ChannelID:      channel.SysChannelID,
+		UpChannelID:    channel.UpChannelId,
+		ChannelCode:    &channel.Coding,
+		Title:          req.ProductInfo,
+		PayEmail:       req.PayEmail,
+		PayPhone:       req.PayPhone,
+		MTitle:         &merchant.NickName,
+		ChannelTitle:   &channel.SysChannelTitle,
+		UpChannelCode:  &channel.UpstreamCode,
+		UpChannelTitle: &channel.UpChannelTitle,
+		MRate:          &channel.MDefaultRate,
+		UpRate:         &channel.UpChannelRate,
+		MFixedFee:      &channel.MSingleFee,
+		UpFixedFee:     &channel.UpSingleFee,
+		Fees:           settle.MerchantTotalFee,
+		Country:        &channel.Country,
+		SettleSnapshot: ordermodel.SettleSnapshot(orderSettle),
 	}
 
 	// 7) 插入数据库
@@ -128,20 +144,28 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 		MerchantID: strconv.FormatUint(merchant.MerchantID, 10),
 		SupplierId: uint64(channel.UpstreamId),
 		Amount:     req.Amount,
-		Currency:   req.Currency,
+		Currency:   channel.Currency,
 		Status:     0,
 		UpOrderId:  txId,
+		CreateTime: time.Now(),
 	}
 
-	// 7) 插入数据库
+	// 7) 插入上游交易数据库
 	if err := s.orderDao.InsertTx(txTable, tx); err != nil {
 		return response, err
 	}
-
+	// 更新订单表
+	var updateOrder dto.UpdateOrderVo
+	updateOrder.OrderId = oid
+	updateOrder.UpOrderId = txId
+	updateOrder.UpdateTime = time.Now()
+	if err := s.orderDao.UpdateOrder(table, updateOrder); err != nil {
+		return response, err
+	}
 	// 4) 调用上游下单接口生成支付链接
 
 	var upstreamRequest dto.UpstreamRequest
-	upstreamRequest.Currency = req.Currency
+	upstreamRequest.Currency = channel.Currency
 	upstreamRequest.Amount = req.Amount
 	upstreamRequest.RedirectUrl = req.RedirectUrl
 	upstreamRequest.ProductInfo = req.ProductInfo
@@ -192,7 +216,7 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	//	Amount: req.Amount, Currency: req.Currency, PayMethod: "", CreatedAt: now.Unix(),
 	//}
 	//_ = mq.PublishOrderCreated(evt)
-	response.Code = string(0)
+	response.Code = string(rune(0))
 	return response, nil
 }
 

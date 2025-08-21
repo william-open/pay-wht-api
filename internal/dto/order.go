@@ -11,7 +11,6 @@ type CreateOrderReq struct {
 	PayType      string `json:"pay_type" binding:"required"`        //通道编码
 	NotifyUrl    string `json:"notify_url" binding:"omitempty,url"` //回调地址
 	RedirectUrl  string `json:"redirect_url"`                       //成功跳转地址
-	Currency     string `json:"currency"`                           //货币符号
 	ProductInfo  string `json:"product_info" binding:"required"`    //订单标题/内容
 	AccNo        string `json:"acc_no"`                             // 付款人账号
 	AccName      string `json:"acc_name"`                           //付款人姓名
@@ -51,21 +50,27 @@ type OrderVO struct {
 
 // PaymentChannelVo 支付通道信息
 type PaymentChannelVo struct {
-	MDefaultRate  float64 `json:"MDefaultRate"`
-	MSingleFee    float64 `json:"MSingleFee"`
-	OrderRange    string  `json:"orderRange"`
-	UpDefaultRate float64 `json:"upDefaultRate"`
-	UpSingleFee   float64 `json:"upSingleFee"`
-	Coding        string  `json:"coding"`
-	UpstreamCode  string  `json:"upstreamCode"`
-	Weight        int     `json:"weight"`
-	SysChannelID  int64   `json:"sysChannelId"` // 系统通道编码ID
-	UpChannelID   int64   `json:"upChannelId"`  // 上游通道编码ID
-	UpstreamId    int64   `json:"upstreamId"`   // 上游ID
-	Currency      string  `json:"currency"`     // 货币符号
-	UpAccount     string  `json:"upAccount"`    // 上游商户号
-	ReceivingKey  string  `json:"receivingKey"` // 上游代收密钥
-	ChannelCode   string  `json:"channelCode"`  // 上游通道对接编码
+	MDefaultRate      float64 `json:"mDefaultRate"` // 商户通道费率
+	MSingleFee        float64 `json:"mSingleFee"`   // 商户通道固定费用
+	OrderRange        string  `json:"orderRange"`
+	UpDefaultRate     float64 `json:"upDefaultRate"` //上游通道费率
+	UpSingleFee       float64 `json:"upSingleFee"`   //上游通道固定费用
+	UpstreamCode      string  `json:"upstreamCode"`  //上游通道编码
+	Coding            string  `json:"coding"`        // 系统通道编码
+	Weight            int     `json:"weight"`
+	SysChannelID      int64   `json:"sysChannelId"`      // 系统通道编码ID
+	UpstreamId        int64   `json:"upstreamId"`        // 上游供应商ID
+	UpChannelId       int64   `json:"upChannelId"`       // 上游通道产品ID
+	Currency          string  `json:"currency"`          // 货币符号
+	UpAccount         string  `json:"upAccount"`         // 上游商户号
+	ReceivingKey      string  `json:"receivingKey"`      // 上游代收密钥
+	ChannelCode       string  `json:"channelCode"`       // 上游通道对接编码
+	UpChannelTitle    string  `json:"upChannelTitle"`    // 上游通道名称
+	UpChannelCode     string  `json:"upChannelCode"`     // 上游通道编码
+	UpChannelRate     float64 `json:"upChannelRate"`     // 上游通道费率
+	UpChannelFixedFee string  `json:"upChannelFixedFee"` // 上游通道固定费用
+	SysChannelTitle   string  `json:"sysChannelTitle"`   // 系统通道名称
+	Country           string  `json:"country"`           // 系统通道名称
 }
 
 // QueryAgentMerchant 查询代理商户信息
@@ -75,26 +80,6 @@ type QueryAgentMerchant struct {
 	AId          int64  `json:"aId"`          // 代理ID
 	MId          int64  `json:"mId"`          // 商户ID
 	Currency     string `json:"currency"`     // 货币符号
-}
-
-// SettlementResult 结算数据
-type SettlementResult struct {
-	OrderAmount      float64
-	MerchantFee      float64
-	MerchantFixed    float64
-	MerchantTotalFee float64
-	AgentFee         float64
-	AgentFixed       float64
-	AgentTotalFee    float64
-	UpFeePct         float64
-	UpFixed          float64
-	UpTotalFee       float64
-
-	// outputs
-	MerchantRecv   float64 // 商户最终到账（取决于模式）
-	UpstreamCost   float64 // 上游成本/上游实际保留
-	AgentIncome    float64 // 代理收入
-	PlatformProfit float64 // 平台净利润
 }
 
 // UpstreamResponse 统一上游返回结构体
@@ -151,7 +136,13 @@ type PayWayVo struct {
 }
 
 type UpdateUpTxVo struct {
-	UpOrderId  uint64    `gorm:"column:up_order_id;primaryKey"`
-	UpOrderNo  string    `gorm:"column:up_order_no"`
-	UpdateTime time.Time `gorm:"column:update_time"`
+	UpOrderId  uint64    `json:"column:up_order_id;primaryKey"`
+	UpOrderNo  string    `json:"column:up_order_no"`
+	UpdateTime time.Time `json:"column:update_time"`
+}
+
+type UpdateOrderVo struct {
+	OrderId    uint64    `json:"column:orderId;primaryKey"`
+	UpOrderId  uint64    `json:"column:upOrderId"`
+	UpdateTime time.Time `json:"column:updateTime"`
 }

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"wht-order-api/internal/dao"
+	"wht-order-api/internal/dto"
+	"wht-order-api/internal/service"
 
 	"github.com/streadway/amqp"
 	"wht-order-api/internal/dal"
@@ -27,21 +29,22 @@ type HyperfOrderMessage struct {
 	Timestamp int64   `json:"timestamp"` // 时间戳
 }
 
+// NotifyMerchantPayload 通知下游商户端的回调通知信息
 type NotifyMerchantPayload struct {
-	TranFlow    string `json:"tranFlow"`
-	PaySerialNo string `json:"paySerialNo"`
+	TranFlow    string `json:"tran_flow"`
+	PaySerialNo string `json:"pay_serial_no"`
 	Status      string `json:"status"`
 	Msg         string `json:"msg"`
-	MerchantNo  string `json:"merchantNo"`
+	MerchantNo  string `json:"merchant_no"`
 	Sign        string `json:"sign"`
 	Amount      string `json:"amount"`
 }
 
 const (
 	maxRetry     = 3
-	exchangeName = "order_exchange"     // 匹配 Hyperf
-	queueName    = "order_status_queue" // 匹配 Hyperf
-	routingKey   = "order.status"       // 匹配 Hyperf
+	exchangeName = "order_exchange"        // 匹配 Hyperf
+	queueName    = "up.order.notify.queue" // 匹配 Hyperf
+	routingKey   = "order.status"          // 匹配 Hyperf
 )
 
 func StartConsumers() {
@@ -109,7 +112,7 @@ func StartConsumers() {
 		return
 	}
 
-	log.Printf("✅ Successfully started consumer on queue: %s", queueName)
+	log.Printf("✅ Successfully started RabbitMQ consumer on queue: %s", queueName)
 
 	for d := range msgs {
 		go handleOrderMessage(d)
@@ -177,7 +180,18 @@ func processOrderNotification(msg HyperfOrderMessage) error {
 		return fmt.Errorf("merchant not found or inactive: %v", err)
 	}
 
-	// 构建通知负载
+	// 如果订单成功就结算商户与代理分润
+	if convertStatus(msg.Status) == "SUCCESS" {
+		var settleService = &service.SettlementService{}
+		var settlementResult dto.SettlementResult
+		settlementResult = dto.SettlementResult(order.SettleSnapshot)
+		err := settleService.Settlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
+		if err != nil {
+			return fmt.Errorf("settlement  failed err: %v", err)
+		}
+	}
+
+	// 构建回调通知负载
 	payload := NotifyMerchantPayload{
 		TranFlow:    order.MOrderID,
 		PaySerialNo: strconv.FormatUint(order.OrderID, 10),
@@ -254,9 +268,15 @@ func updateMerchantOrder(orderId string, status int8) error {
 	orderTable := getOrderTable("p_order", id, time.Now())
 	// 这里必须有更新字段，例如更新状态、更新时间
 	updateData := map[string]interface{}{
-		"status":      status,
-		"notify_time": time.Now(),
-		"update_time": time.Now(),
+		"notify_status": status,
+		"notify_time":   time.Now(),
+		"update_time":   time.Now(),
+	}
+	if status == 1 { //支付成功时标识完成
+		updateData["finish_time"] = time.Now()
+		updateData["status"] = 1
+	} else {
+		updateData["status"] = 2
 	}
 
 	// 更新数据库

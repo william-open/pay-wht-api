@@ -66,3 +66,8 @@ func (r *OrderDao) InsertTx(table string, o *ordermodel.UpstreamTx) error {
 func (r *OrderDao) UpdateUpTx(table string, o dto.UpdateUpTxVo) error {
 	return dal.OrderDB.Table(table).Where("up_order_id = ?", o.UpOrderId).Updates(o).Error
 }
+
+// 更新订单表
+func (r *OrderDao) UpdateOrder(table string, o dto.UpdateOrderVo) error {
+	return dal.OrderDB.Table(table).Where("order_id = ?", o.OrderId).Updates(o).Error
+}
