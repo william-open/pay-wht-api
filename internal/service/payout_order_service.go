@@ -43,21 +43,23 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		return response, errors.New("金额格式错误")
 	}
 	// 查询系统通道是否有效
-	channelDtail, err := s.QuerySysChannel(req.PayType)
+	channelDetail, err := s.QuerySysChannel(req.PayType)
 	if err != nil {
 		return response, errors.New("通道不存在")
 	}
-	log.Printf("请求通道编码: %v", req.PayType)
+	log.Printf("代付请求通道编码: %v", req.PayType)
 	// 1) 选择可用上游通道
-	channel, err := s.SelectPaymentChannel(uint(merchant.MerchantID), amount, req.PayType, channelDtail.Currency)
+	channel, err := s.SelectPaymentChannel(uint(merchant.MerchantID), amount, req.PayType, channelDetail.Currency)
 	if err != nil || channel.Coding == "" {
+		log.Printf("代付请求，没有可用通道: %v", req.PayType)
 		return response, errors.New("没有可用通道")
 	}
 
 	now := time.Now()
 	// 2) 全局订单ID
 	oid := idgen.New()
-	table := utils.GetShardOrderTable("p_order", oid, now)
+	table := utils.GetShardOrderTable("p_out_order", oid, now)
+	log.Printf("代付，插入数据表: %+v", table)
 
 	// 3) 幂等校验（建议用唯一索引保障）
 	if exist, _ := s.orderDao.GetByMerchantNo(table, merchant.MerchantID, req.TranFlow); exist != nil {
@@ -110,6 +112,13 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		ChannelCode:    &channel.Coding,
 		PayEmail:       req.PayEmail,
 		PayPhone:       req.PayPhone,
+		PayMethod:      req.PayMethod,
+		BankCode:       req.BankCode,
+		BankName:       req.BankName,
+		IdentityNum:    req.IdentityNum,
+		IdentityType:   req.IdentityType,
+		AccountName:    req.AccName,
+		AccountNo:      req.AccNo,
 		MTitle:         &merchant.NickName,
 		ChannelTitle:   &channel.SysChannelTitle,
 		UpChannelCode:  &channel.UpstreamCode,
@@ -120,7 +129,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		UpFixedFee:     &channel.UpSingleFee,
 		Fees:           settle.MerchantTotalFee,
 		Country:        &channel.Country,
-		SettleSnapshot: ordermodel.SettleSnapshot(orderSettle),
+		SettleSnapshot: ordermodel.PayoutSettleSnapshot(orderSettle),
 	}
 
 	// 7) 插入数据库
@@ -130,8 +139,23 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 
 	txId := idgen.New()
 	txTable := utils.GetShardOrderTable("p_up_out_order", txId, time.Now())
-	// 5. 写入上游流水
-	tx := &ordermodel.UpstreamTx{
+
+	// 8) 生成代付分表索引表
+	payoutIndexTable := utils.GetOrderIndexTable("p_out_order_index", time.Now())
+	orderIndexTable := utils.GetShardOrderTable("p_out_order_log", txId, time.Now())
+	payoutIndex := &ordermodel.PayoutOrderIndexModel{
+		MID:               merchant.MerchantID,
+		MOrderID:          req.TranFlow,
+		OrderID:           oid,
+		OrderTableName:    payoutIndexTable,
+		OrderLogTableName: orderIndexTable,
+	}
+	if err := s.orderDao.InsertPayoutOrderIndexTable(payoutIndexTable, payoutIndex); err != nil {
+		return response, err
+	}
+
+	// 9. 写入上游流水
+	tx := &ordermodel.PayoutUpstreamTxM{
 		OrderID:    oid,
 		MerchantID: strconv.FormatUint(merchant.MerchantID, 10),
 		SupplierId: uint64(channel.UpstreamId),
@@ -166,6 +190,9 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	upstreamRequest.ApiKey = merchant.ApiKey
 	upstreamRequest.MchNo = channel.UpAccount
 	upstreamRequest.NotifyUrl = req.NotifyUrl
+	upstreamRequest.IdentityType = req.IdentityType
+	upstreamRequest.IdentityNum = req.IdentityNum
+	upstreamRequest.PayMethod = req.PayMethod
 
 	mOrderId, upOrderNo, _, err := CallUpstreamService(upstreamRequest, channel)
 	if err != nil {
@@ -196,7 +223,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	response.Amount = req.Amount
 
 	// 9) 缓存到 Redis
-	cacheKey := "order:" + strconv.FormatUint(oid, 10)
+	cacheKey := "payout_order:" + strconv.FormatUint(oid, 10)
 	_ = dal.RedisClient.Set(dal.RedisCtx, cacheKey, utils.MapToJSON(m), 10*time.Minute).Err()
 
 	// 10) 发布 MQ 事件

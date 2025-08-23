@@ -33,7 +33,7 @@ func (h *PayoutOrderPayoutHandler) PayoutOrderCreate(c *gin.Context) {
 	}
 
 	// 打印调试日志（可选）
-	log.Printf("收到数据: %+v\n", req)
+	log.Printf("代付收到数据: %+v\n", req)
 
 	// 调用服务层处理
 	response, err := h.svc.Create(req)

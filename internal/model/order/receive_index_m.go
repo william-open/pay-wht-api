@@ -3,7 +3,7 @@ package ordermodel
 import "time"
 
 type ReceiveOrderIndexModel struct {
-	ID                uint64    `gorm:"primaryKey;autoIncrement;column:id" json:"id"`                                                 // 主键ID
+	ID                uint64    `gorm:"primaryKey;autoIncrement;column:id;primaryKey" json:"id"`                                      // 主键ID
 	MID               uint64    `gorm:"column:m_id;not null;index:uniq_merchant_order,unique" json:"mId"`                             // 商户ID
 	MOrderID          string    `gorm:"column:m_order_id;type:varchar(64);not null;index:uniq_merchant_order,unique" json:"mOrderId"` // 商户侧订单号
 	OrderID           uint64    `gorm:"column:order_id;not null;index:idx_order_id" json:"orderId"`                                   // 平台订单ID

@@ -59,7 +59,7 @@ func (r *PayoutOrderDao) ListInTables(tables []string, kw string, status *int8, 
 	return out, total, nil
 }
 
-func (r *PayoutOrderDao) InsertTx(table string, o *ordermodel.UpstreamTx) error {
+func (r *PayoutOrderDao) InsertTx(table string, o *ordermodel.PayoutUpstreamTxM) error {
 	return dal.OrderDB.Table(table).Create(o).Error
 }
 
@@ -73,6 +73,6 @@ func (r *PayoutOrderDao) UpdateOrder(table string, o dto.UpdateOrderVo) error {
 }
 
 // 代付订单表索引表
-func (r *PayoutOrderDao) InsertReceiveOrderIndexTable(table string, o *ordermodel.ReceiveOrderIndexModel) error {
+func (r *PayoutOrderDao) InsertPayoutOrderIndexTable(table string, o *ordermodel.PayoutOrderIndexModel) error {
 	return dal.OrderDB.Table(table).Create(o).Error
 }
