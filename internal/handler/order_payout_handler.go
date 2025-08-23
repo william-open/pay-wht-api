@@ -9,11 +9,15 @@ import (
 	"wht-order-api/internal/service"
 )
 
-type OrderHandler struct{ svc *service.OrderService }
+// 代付处理器
+type PayoutOrderPayoutHandler struct{ svc *service.PayoutOrderService }
 
-func NewOrderHandler() *OrderHandler { return &OrderHandler{svc: service.NewOrderService()} }
+func NewPayoutOrderHandler() *PayoutOrderPayoutHandler {
+	return &PayoutOrderPayoutHandler{svc: service.NewPayoutOrderService()}
+}
 
-func (h *OrderHandler) Create(c *gin.Context) {
+// PayoutOrderCreate 代付订单创建
+func (h *PayoutOrderPayoutHandler) PayoutOrderCreate(c *gin.Context) {
 	// 从中间件获取 pay_request 数据
 	val, exists := c.Get("pay_request")
 	if !exists {
@@ -41,7 +45,8 @@ func (h *OrderHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-func (h *OrderHandler) Get(c *gin.Context) {
+// PayoutOrderQuery 代付订单查询
+func (h *PayoutOrderPayoutHandler) PayoutOrderQuery(c *gin.Context) {
 	idStr := c.Param("id")
 	id, _ := strconv.ParseUint(idStr, 10, 64)
 	m, err := h.svc.Get(id)

@@ -46,9 +46,14 @@ func main() {
 
 	v1 := r.Group("/api/v1")
 	{
-		oh := handler.NewOrderHandler()
-		v1.POST("/order/create", middleware.AuthMD5Sign(), oh.Create)
-		v1.GET("/order/:id", oh.Get)
+		receive := handler.NewReceiveOrderHandler()
+		payout := handler.NewPayoutOrderHandler()
+		// 代收网关
+		v1.POST("/order/receive/create", middleware.ReceiveCreateAuth(), receive.ReceiveOrderCreate)
+		v1.POST("/order/receive/query", middleware.ReceiveQueryAuth(), receive.ReceiveOrderQuery)
+		// 代付网关
+		v1.POST("/order/payout/create", middleware.PayoutCreateAuth(), payout.PayoutOrderCreate)
+		v1.POST("/order/payout/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 	}
 
 	addr := ":" + config.C.Server.Port

@@ -17,27 +17,20 @@ import (
 	ordermodel "wht-order-api/internal/model/order"
 )
 
-type OrderService struct {
+type PayoutOrderService struct {
 	mainDao  *dao.MainDao
 	orderDao *dao.OrderDao
 }
 
-func NewOrderService() *OrderService {
-	return &OrderService{
+func NewPayoutOrderService() *PayoutOrderService {
+	return &PayoutOrderService{
 		mainDao:  &dao.MainDao{},
 		orderDao: &dao.OrderDao{},
 	}
 }
 
-// 分片表名生成器：p_order_{YYYYMM}_p{orderID % 4}
-func getOrderTable(base string, orderID uint64, t time.Time) string {
-	month := t.Format("200601")
-	shard := orderID % 4
-	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
-}
-
 // Create 处理代收订单下单业务逻辑
-func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, error) {
+func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, error) {
 	var response dto.CreateOrderResp
 	// 1) 主库校验
 	merchant, err := s.mainDao.GetMerchant(req.MerchantNo)
@@ -63,7 +56,7 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	now := time.Now()
 	// 2) 全局订单ID
 	oid := idgen.New()
-	table := getOrderTable("p_order", oid, now)
+	table := utils.GetShardOrderTable("p_order", oid, now)
 
 	// 3) 幂等校验（建议用唯一索引保障）
 	if exist, _ := s.orderDao.GetByMerchantNo(table, merchant.MerchantID, req.TranFlow); exist != nil {
@@ -137,7 +130,7 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	}
 
 	txId := idgen.New()
-	txTable := getOrderTable("p_up_order", txId, time.Now())
+	txTable := utils.GetShardOrderTable("p_up_order", txId, time.Now())
 	// 5. 写入上游流水
 	tx := &ordermodel.UpstreamTx{
 		OrderID:    oid,
@@ -220,7 +213,7 @@ func (s *OrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, erro
 	return response, nil
 }
 
-func (s *OrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
+func (s *PayoutOrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
 	// 优先读 Redis
 	cacheKey := "order:" + strconv.FormatUint(id, 10)
 	if sjson, err := dal.RedisClient.Get(dal.RedisCtx, cacheKey).Result(); err == nil {
@@ -231,12 +224,12 @@ func (s *OrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
 	}
 
 	// fallback DB：按 ID 推导分片表
-	table := getOrderTable("p_order", id, time.Now())
+	table := utils.GetShardOrderTable("p_order", id, time.Now())
 	return s.orderDao.GetByID(table, id)
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道
-func (s *OrderService) SelectPaymentChannel(merchantID uint, amount float64, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
+func (s *PayoutOrderService) SelectPaymentChannel(merchantID uint, amount float64, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
 
 	var payRouteList []dto.PaymentChannelVo
 	// 查询商户路由
@@ -263,7 +256,7 @@ func (s *OrderService) SelectPaymentChannel(merchantID uint, amount float64, cha
 }
 
 // SelectPaymentChannel 查询系统通道编码
-func (s *OrderService) QuerySysChannel(channelCode string) (dto.PayWayVo, error) {
+func (s *PayoutOrderService) QuerySysChannel(channelCode string) (dto.PayWayVo, error) {
 
 	var payWayDetail dto.PayWayVo
 	// 查询商户路由

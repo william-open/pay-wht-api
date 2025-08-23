@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// AuthMD5Sign 中间件：验证 POST JSON 请求签名
-func AuthMD5Sign() gin.HandlerFunc {
+// ReceiveCreateAuth 中间件：验证 代收订单创建 POST JSON 请求签名
+func ReceiveCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
 			c.Next()

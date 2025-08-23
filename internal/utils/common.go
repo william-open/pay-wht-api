@@ -2,8 +2,10 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // MatchOrderRange 判断金额是否符合 orderRange 规则
@@ -46,4 +48,11 @@ func MatchOrderRange(amount float64, orderRange string) bool {
 func MapToJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// 分片表名生成器：p_order_{YYYYMM}_p{orderID % 4}
+func GetShardOrderTable(base string, orderID uint64, t time.Time) string {
+	month := t.Format("200601")
+	shard := orderID % 4
+	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
 }
