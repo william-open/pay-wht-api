@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -22,11 +23,11 @@ import (
 
 // HyperfOrderMessage 匹配 Hyperf 发送的消息格式
 type HyperfOrderMessage struct {
-	MOrderID  string  `json:"mOrderId"`  // 商户订单号
-	UpOrderID string  `json:"upOrderId"` // 平台流水号
-	Amount    float64 `json:"amount"`    // 金额
-	Status    string  `json:"status"`    // 状态
-	Timestamp int64   `json:"timestamp"` // 时间戳
+	MOrderID  string          `json:"mOrderId"`  // 商户订单号
+	UpOrderID string          `json:"upOrderId"` // 平台流水号
+	Amount    decimal.Decimal `json:"amount"`    // 金额
+	Status    string          `json:"status"`    // 状态
+	Timestamp int64           `json:"timestamp"` // 时间戳
 }
 
 // NotifyMerchantPayload 通知下游商户端的回调通知信息

@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"log"
 	"strconv"
 	"time"
@@ -42,7 +41,7 @@ func (s *SettlementService) Settlement(req dto.SettlementResult, mId string, ord
 
 	// 创建商户资金日志
 	var moneyLog dto.MoneyLog
-	moneyLog.Money = decimal.NewFromFloat(req.MerchantRecv)
+	moneyLog.Money = req.MerchantRecv
 	moneyLog.UID = merchant.MerchantID
 	moneyLog.OrderNo = strconv.FormatUint(orderId, 10)
 	moneyLog.Type = 1
@@ -56,8 +55,8 @@ func (s *SettlementService) Settlement(req dto.SettlementResult, mId string, ord
 	}
 	// 更新代理收益
 	var agentMoney dto.AgentMoney
-	agentMoney.OrderMoney = decimal.NewFromFloat(req.OrderAmount)
-	agentMoney.Money = decimal.NewFromFloat(req.AgentIncome)
+	agentMoney.OrderMoney = req.OrderAmount
+	agentMoney.Money = req.AgentIncome
 	agentMoney.MID = merchant.MerchantID
 	agentMoney.AID = merchant.PId
 	agentMoney.OrderNo = strconv.FormatUint(orderId, 10)

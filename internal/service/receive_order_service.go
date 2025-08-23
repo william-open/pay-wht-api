@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jinzhu/copier"
+	"github.com/shopspring/decimal"
 	"log"
 	"strconv"
 	"time"
@@ -37,7 +38,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	if err != nil || merchant == nil || merchant.Status != 1 {
 		return response, errors.New("merchant invalid")
 	}
-	amount, err := strconv.ParseFloat(req.Amount, 64)
+	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
 		return response, errors.New("金额格式错误")
 	}
@@ -71,7 +72,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	//upRespData.RawResponse = upResp // 保留原始响应，便于日志追踪
 
 	// 5) 订单结算计算
-	var agentPct, agentFixed float64 = 0, 0
+	var agentPct, agentFixed = decimal.Zero, decimal.Zero
 	if merchant.PId > 0 {
 		var agentMerchant dto.QueryAgentMerchant
 		agentMerchant.AId = int64(merchant.PId)
@@ -86,7 +87,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 		}
 	}
 	// 订单金额转化浮点数
-	orderAmount, err := strconv.ParseFloat(req.Amount, 64)
+	orderAmount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
 		return response, errors.New("无效的浮点数")
 	}
@@ -155,8 +156,23 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	if err := s.orderDao.UpdateOrder(table, updateOrder); err != nil {
 		return response, err
 	}
-	// 4) 调用上游下单接口生成支付链接
 
+	// 8) 生成代收分表索引表
+	receiveIndexTable := utils.GetOrderIndexTable("p_order_index", time.Now())
+	orderIndexTable := utils.GetShardOrderTable("p_order_log", txId, time.Now())
+	receiveIndex := &ordermodel.ReceiveOrderIndexModel{
+		MID:               merchant.MerchantID,
+		MOrderID:          req.TranFlow,
+		OrderID:           oid,
+		OrderTableName:    receiveIndexTable,
+		OrderLogTableName: orderIndexTable,
+	}
+
+	if err := s.orderDao.InsertReceiveOrderIndexTable(receiveIndexTable, receiveIndex); err != nil {
+		return response, err
+	}
+
+	// 9) 调用上游下单接口生成支付链接
 	var upstreamRequest dto.UpstreamRequest
 	upstreamRequest.Currency = channel.Currency
 	upstreamRequest.Amount = req.Amount
@@ -229,7 +245,7 @@ func (s *ReceiveOrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) 
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道
-func (s *ReceiveOrderService) SelectPaymentChannel(merchantID uint, amount float64, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
+func (s *ReceiveOrderService) SelectPaymentChannel(merchantID uint, amount decimal.Decimal, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
 
 	var payRouteList []dto.PaymentChannelVo
 	// 查询商户路由

@@ -39,7 +39,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 		// 解析 JSON
-		var req dto.CreateOrderReq
+		var req dto.CreatePayoutOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			log.Printf("错误不能解析数据: %v", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid request params"})
@@ -76,16 +76,15 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			"amount":        req.Amount,
 			"pay_type":      req.PayType,
 			"notify_url":    req.NotifyUrl,
-			"redirect_url":  req.RedirectUrl,
-			//"currency":      req.Currency,
-			"product_info": req.ProductInfo,
-			"acc_no":       req.AccNo,
-			"acc_name":     req.AccName,
-			"pay_email":    req.PayEmail,
-			"pay_phone":    req.PayPhone,
-			"bank_code":    req.BankCode,
-			"bank_name":    req.BankName,
-			"sign":         req.Sign,
+			"acc_no":        req.AccNo,
+			"acc_name":      req.AccName,
+			"pay_email":     req.PayEmail,
+			"pay_phone":     req.PayPhone,
+			"bank_code":     req.BankCode,
+			"bank_name":     req.BankName,
+			"identity_type": req.IdentityType,
+			"identity_num":  req.IdentityNum,
+			"sign":          req.Sign,
 		}
 
 		apiKey := merchant.ApiKey
@@ -97,7 +96,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		c.Set("pay_request", req) // 放入 context 供 handler 使用
+		c.Set("payout_request", req) // 放入 context 供 handler 使用
 		c.Next()
 	}
 }

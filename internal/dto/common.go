@@ -1,6 +1,9 @@
 package dto
 
-import "time"
+import (
+	"github.com/shopspring/decimal"
+	"time"
+)
 
 // UpstreamResponse 统一上游返回结构体
 type UpstreamResponse struct {
@@ -16,13 +19,13 @@ type UpstreamResponse struct {
 
 // NotifyMerchantPayload 通知商户消息
 type NotifyMerchantPayload struct {
-	TranFlow    string  `json:"tranFlow"`
-	PaySerialNo string  `json:"paySerialNo"`
-	Status      string  `json:"status"`
-	Msg         string  `json:"msg"`
-	MerchantNo  string  `json:"merchantNo"`
-	Sign        string  `json:"sign"`
-	Amount      float64 `json:"amount"`
+	TranFlow    string          `json:"tranFlow"`
+	PaySerialNo string          `json:"paySerialNo"`
+	Status      string          `json:"status"`
+	Msg         string          `json:"msg"`
+	MerchantNo  string          `json:"merchantNo"`
+	Sign        string          `json:"sign"`
+	Amount      decimal.Decimal `json:"amount"`
 }
 
 // 请求上游供应商参数 UpstreamRequest
@@ -78,25 +81,25 @@ type QueryAgentMerchant struct {
 
 // PaymentChannelVo 支付通道信息
 type PaymentChannelVo struct {
-	MDefaultRate      float64 `json:"mDefaultRate"` // 商户通道费率
-	MSingleFee        float64 `json:"mSingleFee"`   // 商户通道固定费用
-	OrderRange        string  `json:"orderRange"`
-	UpDefaultRate     float64 `json:"upDefaultRate"` //上游通道费率
-	UpSingleFee       float64 `json:"upSingleFee"`   //上游通道固定费用
-	UpstreamCode      string  `json:"upstreamCode"`  //上游通道编码
-	Coding            string  `json:"coding"`        // 系统通道编码
-	Weight            int     `json:"weight"`
-	SysChannelID      int64   `json:"sysChannelId"`      // 系统通道编码ID
-	UpstreamId        int64   `json:"upstreamId"`        // 上游供应商ID
-	UpChannelId       int64   `json:"upChannelId"`       // 上游通道产品ID
-	Currency          string  `json:"currency"`          // 货币符号
-	UpAccount         string  `json:"upAccount"`         // 上游商户号
-	ReceivingKey      string  `json:"receivingKey"`      // 上游代收密钥
-	ChannelCode       string  `json:"channelCode"`       // 上游通道对接编码
-	UpChannelTitle    string  `json:"upChannelTitle"`    // 上游通道名称
-	UpChannelCode     string  `json:"upChannelCode"`     // 上游通道编码
-	UpChannelRate     float64 `json:"upChannelRate"`     // 上游通道费率
-	UpChannelFixedFee string  `json:"upChannelFixedFee"` // 上游通道固定费用
-	SysChannelTitle   string  `json:"sysChannelTitle"`   // 系统通道名称
-	Country           string  `json:"country"`           // 系统通道名称
+	MDefaultRate      decimal.Decimal `json:"mDefaultRate"` // 商户通道费率
+	MSingleFee        decimal.Decimal `json:"mSingleFee"`   // 商户通道固定费用
+	OrderRange        string          `json:"orderRange"`
+	UpDefaultRate     decimal.Decimal `json:"upDefaultRate"` //上游通道费率
+	UpSingleFee       decimal.Decimal `json:"upSingleFee"`   //上游通道固定费用
+	UpstreamCode      string          `json:"upstreamCode"`  //上游通道编码
+	Coding            string          `json:"coding"`        // 系统通道编码
+	Weight            int             `json:"weight"`
+	SysChannelID      int64           `json:"sysChannelId"`      // 系统通道编码ID
+	UpstreamId        int64           `json:"upstreamId"`        // 上游供应商ID
+	UpChannelId       int64           `json:"upChannelId"`       // 上游通道产品ID
+	Currency          string          `json:"currency"`          // 货币符号
+	UpAccount         string          `json:"upAccount"`         // 上游商户号
+	ReceivingKey      string          `json:"receivingKey"`      // 上游代收密钥
+	ChannelCode       string          `json:"channelCode"`       // 上游通道对接编码
+	UpChannelTitle    string          `json:"upChannelTitle"`    // 上游通道名称
+	UpChannelCode     string          `json:"upChannelCode"`     // 上游通道编码
+	UpChannelRate     decimal.Decimal `json:"upChannelRate"`     // 上游通道费率
+	UpChannelFixedFee string          `json:"upChannelFixedFee"` // 上游通道固定费用
+	SysChannelTitle   string          `json:"sysChannelTitle"`   // 系统通道名称
+	Country           string          `json:"country"`           // 系统通道名称
 }

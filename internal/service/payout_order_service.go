@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jinzhu/copier"
+	"github.com/shopspring/decimal"
 	"log"
 	"strconv"
 	"time"
@@ -19,25 +20,25 @@ import (
 
 type PayoutOrderService struct {
 	mainDao  *dao.MainDao
-	orderDao *dao.OrderDao
+	orderDao *dao.PayoutOrderDao
 }
 
 func NewPayoutOrderService() *PayoutOrderService {
 	return &PayoutOrderService{
 		mainDao:  &dao.MainDao{},
-		orderDao: &dao.OrderDao{},
+		orderDao: &dao.PayoutOrderDao{},
 	}
 }
 
 // Create 处理代收订单下单业务逻辑
-func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp, error) {
-	var response dto.CreateOrderResp
+func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePayoutOrderResp, error) {
+	var response dto.CreatePayoutOrderResp
 	// 1) 主库校验
 	merchant, err := s.mainDao.GetMerchant(req.MerchantNo)
 	if err != nil || merchant == nil || merchant.Status != 1 {
 		return response, errors.New("merchant invalid")
 	}
-	amount, err := strconv.ParseFloat(req.Amount, 64)
+	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
 		return response, errors.New("金额格式错误")
 	}
@@ -71,7 +72,7 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	//upRespData.RawResponse = upResp // 保留原始响应，便于日志追踪
 
 	// 5) 订单结算计算
-	var agentPct, agentFixed float64 = 0, 0
+	var agentPct, agentFixed = decimal.Zero, decimal.Zero
 	if merchant.PId > 0 {
 		var agentMerchant dto.QueryAgentMerchant
 		agentMerchant.AId = int64(merchant.PId)
@@ -86,7 +87,7 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 		}
 	}
 	// 订单金额转化浮点数
-	orderAmount, err := strconv.ParseFloat(req.Amount, 64)
+	orderAmount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
 		return response, errors.New("无效的浮点数")
 	}
@@ -95,7 +96,7 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	_ = copier.Copy(&orderSettle, &settle)
 
 	// 6) 构造订单模型
-	m := &ordermodel.MerchantOrder{
+	m := &ordermodel.MerchantPayOutOrderM{
 		OrderID:        oid,
 		MID:            merchant.MerchantID,
 		MOrderID:       req.TranFlow,
@@ -104,11 +105,9 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 		SupplierID:     channel.UpstreamId,
 		Status:         0,
 		NotifyURL:      req.NotifyUrl,
-		ReturnURL:      req.RedirectUrl,
 		ChannelID:      channel.SysChannelID,
 		UpChannelID:    channel.UpChannelId,
 		ChannelCode:    &channel.Coding,
-		Title:          req.ProductInfo,
 		PayEmail:       req.PayEmail,
 		PayPhone:       req.PayPhone,
 		MTitle:         &merchant.NickName,
@@ -130,7 +129,7 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	}
 
 	txId := idgen.New()
-	txTable := utils.GetShardOrderTable("p_up_order", txId, time.Now())
+	txTable := utils.GetShardOrderTable("p_up_out_order", txId, time.Now())
 	// 5. 写入上游流水
 	tx := &ordermodel.UpstreamTx{
 		OrderID:    oid,
@@ -160,8 +159,6 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	var upstreamRequest dto.UpstreamRequest
 	upstreamRequest.Currency = channel.Currency
 	upstreamRequest.Amount = req.Amount
-	upstreamRequest.RedirectUrl = req.RedirectUrl
-	upstreamRequest.ProductInfo = req.ProductInfo
 	upstreamRequest.PayType = req.PayType
 	upstreamRequest.Currency = channel.Currency
 	upstreamRequest.ProviderKey = channel.ChannelCode
@@ -170,7 +167,7 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	upstreamRequest.MchNo = channel.UpAccount
 	upstreamRequest.NotifyUrl = req.NotifyUrl
 
-	mOrderId, upOrderNo, payUrl, err := CallUpstreamService(upstreamRequest, channel)
+	mOrderId, upOrderNo, _, err := CallUpstreamService(upstreamRequest, channel)
 	if err != nil {
 		fmt.Println("请求上游供应商失败:", err.Error())
 		return response, errors.New("请求上游供应商失败")
@@ -193,7 +190,6 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 		return response, err
 	}
 
-	response.Yul1 = payUrl
 	response.PaySerialNo = string(oid) //订单表编号
 	response.TranFlow = req.TranFlow
 	response.SysTime = time.Now().String()
@@ -213,23 +209,23 @@ func (s *PayoutOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderResp
 	return response, nil
 }
 
-func (s *PayoutOrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
+func (s *PayoutOrderService) Get(id uint64) (*ordermodel.MerchantPayOutOrderM, error) {
 	// 优先读 Redis
-	cacheKey := "order:" + strconv.FormatUint(id, 10)
+	cacheKey := "payout_order:" + strconv.FormatUint(id, 10)
 	if sjson, err := dal.RedisClient.Get(dal.RedisCtx, cacheKey).Result(); err == nil {
-		var mo ordermodel.MerchantOrder
+		var mo ordermodel.MerchantPayOutOrderM
 		if err := json.Unmarshal([]byte(sjson), &mo); err == nil {
 			return &mo, nil
 		}
 	}
 
 	// fallback DB：按 ID 推导分片表
-	table := utils.GetShardOrderTable("p_order", id, time.Now())
+	table := utils.GetShardOrderTable("p_out_order", id, time.Now())
 	return s.orderDao.GetByID(table, id)
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道
-func (s *PayoutOrderService) SelectPaymentChannel(merchantID uint, amount float64, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
+func (s *PayoutOrderService) SelectPaymentChannel(merchantID uint, amount decimal.Decimal, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
 
 	var payRouteList []dto.PaymentChannelVo
 	// 查询商户路由

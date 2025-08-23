@@ -19,14 +19,14 @@ func NewPayoutOrderHandler() *PayoutOrderPayoutHandler {
 // PayoutOrderCreate 代付订单创建
 func (h *PayoutOrderPayoutHandler) PayoutOrderCreate(c *gin.Context) {
 	// 从中间件获取 pay_request 数据
-	val, exists := c.Get("pay_request")
+	val, exists := c.Get("payout_request")
 	if !exists {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "pay_request not found"})
 		return
 	}
 
-	// 类型断言为 dto.CreateOrderReq
-	req, ok := val.(dto.CreateOrderReq)
+	// 类型断言为 dto.CreatePayoutOrderReq
+	req, ok := val.(dto.CreatePayoutOrderReq)
 	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid pay_request type"})
 		return
