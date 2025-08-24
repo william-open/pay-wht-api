@@ -73,6 +73,16 @@ func (r *OrderDao) UpdateOrder(table string, o dto.UpdateOrderVo) error {
 }
 
 // 代收订单表索引表
-func (r *OrderDao) InsertReceiveOrderIndexTable(table string, o *ordermodel.ReceiveOrderIndexModel) error {
+func (r *OrderDao) InsertReceiveOrderIndexTable(table string, o *ordermodel.ReceiveOrderIndexM) error {
 	return dal.OrderDB.Table(table).Create(o).Error
+}
+
+// 查询订单信息
+func (r *OrderDao) GetByOrderId(table string, orderId uint64) (ordermodel.MerchantOrder, error) {
+	var m ordermodel.MerchantOrder
+	err := dal.OrderDB.Table(table).Where("order_id=?", orderId).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return m, nil
+	}
+	return m, err
 }

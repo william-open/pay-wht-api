@@ -73,6 +73,16 @@ func (r *PayoutOrderDao) UpdateOrder(table string, o dto.UpdateOrderVo) error {
 }
 
 // 代付订单表索引表
-func (r *PayoutOrderDao) InsertPayoutOrderIndexTable(table string, o *ordermodel.PayoutOrderIndexModel) error {
+func (r *PayoutOrderDao) InsertPayoutOrderIndexTable(table string, o *ordermodel.PayoutOrderIndexM) error {
 	return dal.OrderDB.Table(table).Create(o).Error
+}
+
+// 查询订单信息
+func (r *PayoutOrderDao) GetByOrderId(table string, orderId uint64) (ordermodel.MerchantPayOutOrderM, error) {
+	var m ordermodel.MerchantPayOutOrderM
+	err := dal.OrderDB.Table(table).Where("order_id=?", orderId).First(&m).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return m, nil
+	}
+	return m, err
 }

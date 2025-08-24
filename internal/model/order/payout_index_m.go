@@ -2,7 +2,7 @@ package ordermodel
 
 import "time"
 
-type PayoutOrderIndexModel struct {
+type PayoutOrderIndexM struct {
 	ID                uint64    `gorm:"primaryKey;autoIncrement;column:id;" json:"id"`                                                // 主键ID
 	MID               uint64    `gorm:"column:m_id;not null;index:uniq_merchant_order,unique" json:"mId"`                             // 商户ID
 	MOrderID          string    `gorm:"column:m_order_id;type:varchar(64);not null;index:uniq_merchant_order,unique" json:"mOrderId"` // 商户侧订单号

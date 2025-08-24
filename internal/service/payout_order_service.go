@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jinzhu/copier"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"strconv"
 	"time"
+	mainmodel "wht-order-api/internal/model/main"
 	"wht-order-api/internal/utils"
 
 	"wht-order-api/internal/dal"
@@ -19,14 +19,16 @@ import (
 )
 
 type PayoutOrderService struct {
-	mainDao  *dao.MainDao
-	orderDao *dao.PayoutOrderDao
+	mainDao       *dao.MainDao
+	orderDao      *dao.PayoutOrderDao
+	indexTableDao *dao.IndexTableDao
 }
 
 func NewPayoutOrderService() *PayoutOrderService {
 	return &PayoutOrderService{
-		mainDao:  &dao.MainDao{},
-		orderDao: &dao.PayoutOrderDao{},
+		mainDao:       &dao.MainDao{},
+		orderDao:      &dao.PayoutOrderDao{},
+		indexTableDao: &dao.IndexTableDao{},
 	}
 }
 
@@ -105,7 +107,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		Amount:         orderAmount,
 		Currency:       channel.Currency,
 		SupplierID:     channel.UpstreamId,
-		Status:         0,
+		Status:         1,
 		NotifyURL:      req.NotifyUrl,
 		ChannelID:      channel.SysChannelID,
 		UpChannelID:    channel.UpChannelId,
@@ -143,7 +145,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	// 8) 生成代付分表索引表
 	payoutIndexTable := utils.GetOrderIndexTable("p_out_order_index", time.Now())
 	orderIndexTable := utils.GetShardOrderTable("p_out_order_log", txId, time.Now())
-	payoutIndex := &ordermodel.PayoutOrderIndexModel{
+	payoutIndex := &ordermodel.PayoutOrderIndexM{
 		MID:               merchant.MerchantID,
 		MOrderID:          req.TranFlow,
 		OrderID:           oid,
@@ -236,19 +238,32 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	return response, nil
 }
 
-func (s *PayoutOrderService) Get(id uint64) (*ordermodel.MerchantPayOutOrderM, error) {
-	// 优先读 Redis
-	cacheKey := "payout_order:" + strconv.FormatUint(id, 10)
-	if sjson, err := dal.RedisClient.Get(dal.RedisCtx, cacheKey).Result(); err == nil {
-		var mo ordermodel.MerchantPayOutOrderM
-		if err := json.Unmarshal([]byte(sjson), &mo); err == nil {
-			return &mo, nil
-		}
+func (s *PayoutOrderService) Get(param dto.QueryPayoutOrderReq) (dto.QueryPayoutOrderResp, error) {
+	var resp dto.QueryPayoutOrderResp
+
+	indexTable := utils.GetOrderIndexTable("p_out_order_index", time.Now())
+
+	mId, err := s.GetMerchantInfo(param.MerchantNo)
+	if err != nil {
+		return resp, err
 	}
 
-	// fallback DB：按 ID 推导分片表
-	table := utils.GetShardOrderTable("p_out_order", id, time.Now())
-	return s.orderDao.GetByID(table, id)
+	indexTableResult, _ := s.indexTableDao.GetByIndexTable(indexTable, param.TranFlow, mId)
+	orderIndexTable := utils.GetShardOrderTable("p_out_order", indexTableResult.OrderID, time.Now())
+
+	var orderData ordermodel.MerchantPayOutOrderM
+	orderData, err = s.orderDao.GetByOrderId(orderIndexTable, indexTableResult.OrderID)
+	if err != nil {
+		return resp, err
+	}
+
+	resp.Status = utils.ConvertOrderStatus(orderData.Status)
+	resp.TranFlow = orderData.MOrderID
+	resp.PaySerialNo = strconv.FormatUint(orderData.OrderID, 10)
+	resp.Amount = orderData.Amount.String()
+	resp.Code = string('0')
+
+	return resp, nil
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道
@@ -290,4 +305,16 @@ func (s *PayoutOrderService) QuerySysChannel(channelCode string) (dto.PayWayVo, 
 	}
 
 	return payWayDetail, nil
+}
+
+func (s *PayoutOrderService) GetMerchantInfo(appId string) (uint64, error) {
+
+	var merchant *mainmodel.Merchant
+	// 1) 主库校验
+	merchant, err := s.mainDao.GetMerchant(appId)
+	if err != nil || merchant == nil || merchant.Status != 1 {
+		return 0, errors.New("merchant invalid")
+	}
+
+	return merchant.MerchantID, nil
 }

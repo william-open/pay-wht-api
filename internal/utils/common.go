@@ -62,3 +62,19 @@ func GetOrderIndexTable(base string, t time.Time) string {
 	month := t.Format("200601")
 	return fmt.Sprintf("%s_%s", base, month)
 }
+
+// 转化订单状态
+func ConvertOrderStatus(status int8) string {
+	var statusStr string
+	switch status {
+	case 1: //处理中
+		statusStr = "0001"
+	case 2: //成功
+		statusStr = "0000"
+	case 3: //冲正退回
+		statusStr = "0005"
+	}
+
+	return statusStr
+
+}

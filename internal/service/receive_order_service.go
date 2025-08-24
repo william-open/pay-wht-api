@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/jinzhu/copier"
@@ -9,6 +8,7 @@ import (
 	"log"
 	"strconv"
 	"time"
+	mainmodel "wht-order-api/internal/model/main"
 	"wht-order-api/internal/utils"
 
 	"wht-order-api/internal/dal"
@@ -19,14 +19,16 @@ import (
 )
 
 type ReceiveOrderService struct {
-	mainDao  *dao.MainDao
-	orderDao *dao.OrderDao
+	mainDao       *dao.MainDao
+	orderDao      *dao.OrderDao
+	indexTableDao *dao.IndexTableDao
 }
 
 func NewReceiveOrderService() *ReceiveOrderService {
 	return &ReceiveOrderService{
-		mainDao:  &dao.MainDao{},
-		orderDao: &dao.OrderDao{},
+		mainDao:       &dao.MainDao{},
+		orderDao:      &dao.OrderDao{},
+		indexTableDao: &dao.IndexTableDao{},
 	}
 }
 
@@ -103,7 +105,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 		Amount:         orderAmount,
 		Currency:       channel.Currency,
 		SupplierID:     channel.UpstreamId,
-		Status:         0,
+		Status:         1,
 		NotifyURL:      req.NotifyUrl,
 		ReturnURL:      req.RedirectUrl,
 		ChannelID:      channel.SysChannelID,
@@ -160,7 +162,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	// 8) 生成代收分表索引表
 	receiveIndexTable := utils.GetOrderIndexTable("p_order_index", time.Now())
 	orderIndexTable := utils.GetShardOrderTable("p_order_log", txId, time.Now())
-	receiveIndex := &ordermodel.ReceiveOrderIndexModel{
+	receiveIndex := &ordermodel.ReceiveOrderIndexM{
 		MID:               merchant.MerchantID,
 		MOrderID:          req.TranFlow,
 		OrderID:           oid,
@@ -229,19 +231,32 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	return response, nil
 }
 
-func (s *ReceiveOrderService) Get(id uint64) (*ordermodel.MerchantOrder, error) {
-	// 优先读 Redis
-	cacheKey := "order:" + strconv.FormatUint(id, 10)
-	if sjson, err := dal.RedisClient.Get(dal.RedisCtx, cacheKey).Result(); err == nil {
-		var mo ordermodel.MerchantOrder
-		if err := json.Unmarshal([]byte(sjson), &mo); err == nil {
-			return &mo, nil
-		}
+// 代收订单查询
+func (s *ReceiveOrderService) Get(param dto.QueryReceiveOrderReq) (dto.QueryReceiveOrderResp, error) {
+	var resp dto.QueryReceiveOrderResp
+	indexTable := utils.GetOrderIndexTable("p_order_index", time.Now())
+
+	mId, err := s.GetMerchantInfo(param.MerchantNo)
+	if err != nil {
+		return resp, err
 	}
 
-	// fallback DB：按 ID 推导分片表
-	table := utils.GetShardOrderTable("p_order", id, time.Now())
-	return s.orderDao.GetByID(table, id)
+	indexTableResult, _ := s.indexTableDao.GetByIndexTable(indexTable, param.TranFlow, mId)
+	orderIndexTable := utils.GetShardOrderTable("p_order", indexTableResult.OrderID, time.Now())
+
+	var orderData ordermodel.MerchantOrder
+	orderData, err = s.orderDao.GetByOrderId(orderIndexTable, indexTableResult.OrderID)
+	if err != nil {
+		return resp, err
+	}
+
+	resp.Status = utils.ConvertOrderStatus(orderData.Status)
+	resp.TranFlow = orderData.MOrderID
+	resp.PaySerialNo = strconv.FormatUint(orderData.OrderID, 10)
+	resp.Amount = orderData.Amount.String()
+	resp.Code = string('0')
+
+	return resp, nil
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道
@@ -283,4 +298,16 @@ func (s *ReceiveOrderService) QuerySysChannel(channelCode string) (dto.PayWayVo,
 	}
 
 	return payWayDetail, nil
+}
+
+func (s *ReceiveOrderService) GetMerchantInfo(appId string) (uint64, error) {
+
+	var merchant *mainmodel.Merchant
+	// 1) 主库校验
+	merchant, err := s.mainDao.GetMerchant(appId)
+	if err != nil || merchant == nil || merchant.Status != 1 {
+		return 0, errors.New("merchant invalid")
+	}
+
+	return merchant.MerchantID, nil
 }

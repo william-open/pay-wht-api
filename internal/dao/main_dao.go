@@ -277,3 +277,12 @@ func (r *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney) error {
 func (r *MainDao) WithTransaction(fn func(tx *gorm.DB) error) error {
 	return dal.MainDB.Transaction(fn)
 }
+
+// GetAccountDetail 获取商户指定货币账户信息
+func (r *MainDao) GetAccountDetail(mId uint64, currency string) (dto.AccountResp, error) {
+	var ch dto.AccountResp
+	if err := dal.MainDB.Table("w_merchant_money AS a").Joins("w_merchant AS b ON a.uid = b.m_id").Select("b.nickname as acc_name,b.app_id as merchant_no,a.amount,a.frozen_amount,a.currency").Where("a.uid=?", mId).Where("a.currency = ?", currency).First(&ch).Error; err != nil {
+		return ch, err
+	}
+	return ch, nil
+}

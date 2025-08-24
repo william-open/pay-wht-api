@@ -48,12 +48,15 @@ func main() {
 	{
 		receive := handler.NewReceiveOrderHandler()
 		payout := handler.NewPayoutOrderHandler()
+		account := handler.NewAccountHandler()
 		// 代收网关
 		v1.POST("/order/receive/create", middleware.ReceiveCreateAuth(), receive.ReceiveOrderCreate)
 		v1.POST("/order/receive/query", middleware.ReceiveQueryAuth(), receive.ReceiveOrderQuery)
 		// 代付网关
 		v1.POST("/order/payout/create", middleware.PayoutCreateAuth(), payout.PayoutOrderCreate)
 		v1.POST("/order/payout/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
+		// 查询商户账户信息
+		v1.POST("/query/account/balance", middleware.AccountAuth(), account.Query)
 	}
 
 	addr := ":" + config.C.Server.Port

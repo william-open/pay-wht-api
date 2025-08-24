@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
-	"strconv"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/service"
 )
@@ -47,14 +46,25 @@ func (h *ReceiveOrderHandler) ReceiveOrderCreate(c *gin.Context) {
 
 // 代收订单查询
 func (h *ReceiveOrderHandler) ReceiveOrderQuery(c *gin.Context) {
-	idStr := c.Param("id")
-	id, _ := strconv.ParseUint(idStr, 10, 64)
-	m, err := h.svc.Get(id)
-	if err != nil || m == nil {
-		c.JSON(404, gin.H{"code": 404, "msg": "not found"})
+	// 从中间件获取 account_request 数据
+	val, exists := c.Get("receive_query_request")
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "account_request not found"})
 		return
 	}
-	c.JSON(200, gin.H{
-		"order_id": m.OrderID,
-		"amount":   m.Amount, "currency": m.Currency, "status": m.Status})
+
+	// 类型断言为 dto.AccountReq
+	req, ok := val.(dto.QueryReceiveOrderReq)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid pay_request type"})
+		return
+	}
+	// 调用服务层处理
+	response, err := h.svc.Get(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
 }

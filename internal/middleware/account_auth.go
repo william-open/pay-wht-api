@@ -13,8 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// PayoutQueryAuth 中间件：验证 查询代付 POST JSON 请求签名
-func PayoutQueryAuth() gin.HandlerFunc {
+// AccountAuth 中间件：验证 查询账户 POST JSON 请求签名
+func AccountAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
 			c.Next()
@@ -39,7 +39,7 @@ func PayoutQueryAuth() gin.HandlerFunc {
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 		// 解析 JSON
-		var req dto.QueryPayoutOrderReq
+		var req dto.AccountReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			log.Printf("Receive Query:错误不能解析数据: %v", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid request params"})
@@ -71,7 +71,6 @@ func PayoutQueryAuth() gin.HandlerFunc {
 		params := map[string]string{
 			"version":       req.Version,
 			"merchant_no":   req.MerchantNo,
-			"tran_flow":     req.TranFlow,
 			"tran_datetime": req.TranDatetime,
 			"sign":          req.Sign,
 		}
@@ -85,7 +84,7 @@ func PayoutQueryAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		c.Set("payout_query_request", req) // 放入 context 供 handler 使用
+		c.Set("account_request", req) // 放入 context 供 handler 使用
 		c.Next()
 	}
 }
