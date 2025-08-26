@@ -23,6 +23,7 @@
 
 # Dependency directories (remove the comment below to include it)
 vendor
+logs
 
 # 配置文件
 application.yaml
