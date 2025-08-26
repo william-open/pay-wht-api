@@ -191,7 +191,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	mOrderId, upOrderNo, payUrl, err := CallUpstreamService(upstreamRequest, channel)
 	if err != nil {
 		fmt.Println("请求上游供应商失败:", err.Error())
-		return response, errors.New("请求上游供应商失败")
+		return response, errors.New("请求上游供应商失败:" + err.Error())
 	}
 	// 更新上游交易订单信息
 	var upTx dto.UpdateUpTxVo
@@ -212,9 +212,9 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	}
 
 	response.Yul1 = payUrl
-	response.PaySerialNo = string(oid) //订单表编号
-	response.TranFlow = req.TranFlow
-	response.SysTime = time.Now().String()
+	response.PaySerialNo = strconv.FormatUint(oid, 10) //订单表编号
+	response.TranFlow = req.TranFlow                   //下游商户订单号
+	response.SysTime = strconv.FormatInt(utils.GetTimestampMs(), 10)
 	response.Amount = req.Amount
 
 	// 9) 缓存到 Redis
@@ -227,7 +227,10 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	//	Amount: req.Amount, Currency: req.Currency, PayMethod: "", CreatedAt: now.Unix(),
 	//}
 	//_ = mq.PublishOrderCreated(evt)
-	response.Code = string(rune(0))
+	response.Code = string('0')
+	response.Status = "0001"
+
+	log.Printf("代收下单成功，返回数据:%+v", response)
 	return response, nil
 }
 

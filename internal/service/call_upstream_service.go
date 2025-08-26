@@ -64,11 +64,11 @@ func CallUpstreamService(req dto.UpstreamRequest, channel *dto.PaymentChannelVo)
 		return "", "", "", fmt.Errorf("响应解析失败: %v", err)
 	}
 
-	if data.Code != string(rune(0)) {
+	if data.Code != string('0') {
 		log.Printf("[Upstream] 上游返回错误: %s", data.Msg)
 		return "", "", "", fmt.Errorf("上游错误: %s", data.Msg)
 	}
 
-	log.Printf("[Upstream] 下单成功: upOrderNo=%s, payUrl=%s,mOrderId", data.Data.UpOrderNo, data.Data.PayUrl, data.Data.MOrderId)
+	log.Printf("[Upstream] 下单成功,响应数据: upOrderNo=%+v, payUrl=%+v,mOrderId:%+v", data.Data.UpOrderNo, data.Data.PayUrl, data.Data.MOrderId)
 	return data.Data.MOrderId, data.Data.UpOrderNo, data.Data.PayUrl, nil
 }

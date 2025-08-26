@@ -36,3 +36,7 @@ func IsValidNonce(nonce string) bool {
 	}
 	return true
 }
+
+func GetTimestampMs() int64 {
+	return time.Now().UnixNano() / int64(time.Millisecond)
+}

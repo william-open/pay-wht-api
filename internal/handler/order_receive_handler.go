@@ -8,14 +8,14 @@ import (
 	"wht-order-api/internal/service"
 )
 
-// 代收处理器
+// ReceiveOrderHandler 代收处理器
 type ReceiveOrderHandler struct{ svc *service.ReceiveOrderService }
 
 func NewReceiveOrderHandler() *ReceiveOrderHandler {
 	return &ReceiveOrderHandler{svc: service.NewReceiveOrderService()}
 }
 
-// 代收订单创建
+// ReceiveOrderCreate 代收订单创建
 func (h *ReceiveOrderHandler) ReceiveOrderCreate(c *gin.Context) {
 	// 从中间件获取 pay_request 数据
 	val, exists := c.Get("pay_request")

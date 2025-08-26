@@ -17,12 +17,14 @@ import (
 func ReceiveCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
-			c.Next()
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Only post requests are supported"})
+			c.Abort()
 			return
 		}
 
 		if c.ContentType() != "application/json" {
-			c.Next()
+			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Not application/json request data"})
+			c.Abort()
 			return
 		}
 
@@ -97,6 +99,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		log.Printf("请求参数: %+v", req)
 		c.Set("pay_request", req) // 放入 context 供 handler 使用
 		c.Next()
 	}
