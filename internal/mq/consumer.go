@@ -225,7 +225,7 @@ func notifyMerchant(url string, payload NotifyMerchantPayload) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
-	log.Printf(">>回调下游商户参数: %+v", body)
+	log.Printf(">>回调下游商户参数: %s", string(body))
 
 	// 一定是 POST，并发送 JSON
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
