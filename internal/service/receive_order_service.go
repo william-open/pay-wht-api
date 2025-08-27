@@ -187,6 +187,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	upstreamRequest.ApiKey = merchant.ApiKey
 	upstreamRequest.MchNo = channel.UpAccount
 	upstreamRequest.NotifyUrl = req.NotifyUrl
+	upstreamRequest.Mode = "receive"
 
 	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(upstreamRequest, channel)
 	if err != nil {

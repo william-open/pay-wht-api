@@ -28,6 +28,7 @@ func CallUpstreamReceiveService(req dto.UpstreamRequest, channel *dto.PaymentCha
 		"payPhone":    req.PayPhone,
 		"bankCode":    req.BankCode,
 		"bankName":    req.BankName,
+		"mode":        req.Mode,
 	}
 
 	upstreamUrl := config.C.Upstream.ReceiveApiUrl
