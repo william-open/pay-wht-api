@@ -40,6 +40,7 @@ type UpstreamRequest struct {
 	Currency     string `json:"currency" binding:"required,len=3"` //货币符号
 	ProductInfo  string `json:"productInfo" binding:"required"`    //订单标题/内容
 	ProviderKey  string `json:"providerKey" binding:"required"`    //上游供应商对接编码
+	Model        string `json:"model" binding:"required"`          //模式:receive和payout
 	AccNo        string `json:"accNo"`                             //付款人账号
 	AccName      string `json:"accName"`                           //付款人姓名
 	PayEmail     string `json:"payEmail"`                          //付款人邮箱
@@ -49,6 +50,8 @@ type UpstreamRequest struct {
 	IdentityType string `json:"identityType"`                      //证件类型
 	IdentityNum  string `json:"identityNum"`                       //证件号
 	PayMethod    string `json:"payMethod"`                         //支付方式
+	Mode         string `json:"mode"`                              //模式 receive payout
+
 }
 
 // PayWayVo 系统支付通道信息

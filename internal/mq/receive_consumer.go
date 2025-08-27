@@ -17,12 +17,12 @@ import (
 
 	"github.com/streadway/amqp"
 	"wht-order-api/internal/dal"
-	ordermodel "wht-order-api/internal/model/order"
+	orderModel "wht-order-api/internal/model/order"
 	"wht-order-api/internal/utils"
 )
 
-// HyperfOrderMessage 匹配 Hyperf 发送的消息格式
-type HyperfOrderMessage struct {
+// ReceiveHyperfOrderMessage 匹配 Hyperf 发送的消息格式
+type ReceiveHyperfOrderMessage struct {
 	MOrderID  string          `json:"mOrderId"`  // 商户订单号
 	UpOrderID string          `json:"upOrderId"` // 平台流水号
 	Amount    decimal.Decimal `json:"amount"`    // 金额
@@ -30,8 +30,8 @@ type HyperfOrderMessage struct {
 	Timestamp int64           `json:"timestamp"` // 时间戳
 }
 
-// NotifyMerchantPayload 通知下游商户端的回调通知信息
-type NotifyMerchantPayload struct {
+// ReceiveNotifyMerchantPayload 通知下游商户端的回调通知信息
+type ReceiveNotifyMerchantPayload struct {
 	TranFlow    string `json:"tran_flow"`
 	PaySerialNo string `json:"pay_serial_no"`
 	Status      string `json:"status"`
@@ -42,14 +42,14 @@ type NotifyMerchantPayload struct {
 }
 
 const (
-	maxRetry     = 3
-	exchangeName = "order_exchange"        // 匹配 Hyperf
-	queueName    = "up.order.notify.queue" // 匹配 Hyperf
-	routingKey   = "order.status"          // 匹配 Hyperf
+	receiveMaxRetry     = 3
+	receiveExchangeName = "receive_order_exchange"        // 匹配 Hyperf
+	receiveQueueName    = "receive.up.order.notify.queue" // 匹配 Hyperf
+	receiveRoutingKey   = "receive.order.callback"        // 匹配 Hyperf
 )
 
-func StartConsumers() {
-	log.Printf("RabbitMQ consumer is starting for order status")
+func StartReceiveConsumer() {
+	log.Printf("RabbitMQ receive consumer is starting for order status")
 
 	if dal.RabbitCh == nil {
 		log.Println("RabbitMQ channel not initialized")
@@ -58,7 +58,7 @@ func StartConsumers() {
 
 	// 声明交换器
 	err := dal.RabbitCh.ExchangeDeclare(
-		exchangeName,
+		receiveExchangeName,
 		"direct",
 		true,
 		false,
@@ -73,7 +73,7 @@ func StartConsumers() {
 
 	// 声明队列
 	queue, err := dal.RabbitCh.QueueDeclare(
-		queueName,
+		receiveQueueName,
 		true,
 		false,
 		false,
@@ -88,8 +88,8 @@ func StartConsumers() {
 	// 绑定队列到交换器
 	err = dal.RabbitCh.QueueBind(
 		queue.Name,
-		routingKey,
-		exchangeName,
+		receiveRoutingKey,
+		receiveExchangeName,
 		false,
 		nil,
 	)
@@ -100,7 +100,7 @@ func StartConsumers() {
 
 	// 开始消费
 	msgs, err := dal.RabbitCh.Consume(
-		queueName,
+		receiveQueueName,
 		"",
 		false, // 不自动确认
 		false,
@@ -113,15 +113,15 @@ func StartConsumers() {
 		return
 	}
 
-	log.Printf("✅ Successfully started RabbitMQ consumer on queue: %s", queueName)
+	log.Printf("✅ Successfully started RabbitMQ consumer on queue: %s", receiveQueueName)
 
 	for d := range msgs {
-		go handleOrderMessage(d)
+		go receiveHandleOrderMessage(d)
 	}
 }
 
-func handleOrderMessage(d amqp.Delivery) {
-	var msg HyperfOrderMessage
+func receiveHandleOrderMessage(d amqp.Delivery) {
+	var msg ReceiveHyperfOrderMessage
 	if err := json.Unmarshal(d.Body, &msg); err != nil {
 		log.Printf("❌ Failed to unmarshal order message: %v", err)
 		d.Nack(false, false)
@@ -131,7 +131,7 @@ func handleOrderMessage(d amqp.Delivery) {
 	log.Printf("📨 Received order message: MOrderID=%s, Status=%s, Amount=%.2f",
 		msg.MOrderID, msg.Status, msg.Amount)
 
-	if err := processOrderNotification(msg); err != nil {
+	if err := receiveProcessOrderNotification(msg); err != nil {
 		log.Printf("❌ Failed to process order notification: %v", err)
 		d.Nack(false, false)
 		return
@@ -141,7 +141,7 @@ func handleOrderMessage(d amqp.Delivery) {
 	log.Printf("✅ Successfully processed order: %s", msg.MOrderID)
 }
 
-func processOrderNotification(msg HyperfOrderMessage) error {
+func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 	// 转成 uint64
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
 	if err != nil {
@@ -149,13 +149,13 @@ func processOrderNotification(msg HyperfOrderMessage) error {
 	}
 	txTable := getOrderTable("p_up_order", mOrderIdNum, time.Now())
 
-	var upOrder ordermodel.UpstreamTx
+	var upOrder orderModel.UpstreamTx
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
 		return fmt.Errorf("tx order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
 
 	// 更新上游订单状态
-	upOrder.Status = getUpStatusMessage(msg.Status)
+	upOrder.Status = receiveGetUpStatusMessage(msg.Status)
 	upOrder.UpOrderNo = msg.UpOrderID
 	upOrder.NotifyTime = time.Now()
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
@@ -163,13 +163,13 @@ func processOrderNotification(msg HyperfOrderMessage) error {
 	}
 
 	// 根据商户订单号查找订单
-	var order ordermodel.MerchantOrder
+	var order orderModel.MerchantOrder
 	orderTable := getOrderTable("p_order", upOrder.OrderID, time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
 		return fmt.Errorf("merchant order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
-	order.Status = getUpStatusMessage(msg.Status)
+	order.Status = receiveGetUpStatusMessage(msg.Status)
 	order.NotifyTime = time.Now()
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).Updates(&order).Error; err != nil {
 		return fmt.Errorf("update order not found with MOrderID %v: %w", upOrder.OrderID, err)
@@ -182,7 +182,7 @@ func processOrderNotification(msg HyperfOrderMessage) error {
 	}
 
 	// 如果订单成功就结算商户与代理分润
-	if convertStatus(msg.Status) == "SUCCESS" {
+	if receiveConvertStatus(msg.Status) == "SUCCESS" {
 		var settleService = &service.SettlementService{}
 		var settlementResult dto.SettlementResult
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
@@ -193,33 +193,33 @@ func processOrderNotification(msg HyperfOrderMessage) error {
 	}
 
 	// 构建回调通知负载
-	payload := NotifyMerchantPayload{
+	payload := ReceiveNotifyMerchantPayload{
 		TranFlow:    order.MOrderID,
 		PaySerialNo: strconv.FormatUint(order.OrderID, 10),
 		//Status:      convertStatus(msg.Status),
 		Status:     msg.Status,
-		Msg:        getStatusMessage(msg.Status),
+		Msg:        receiveGetStatusMessage(msg.Status),
 		MerchantNo: merchant.AppId,
 		Amount:     msg.Amount.String(),
 	}
-	payload.Sign = generateSign(payload, merchant.ApiKey)
+	payload.Sign = receiveGenerateSign(payload, merchant.ApiKey)
 
 	// 执行通知，带重试
 	var lastErr error
-	for i := 1; i <= maxRetry; i++ {
-		lastErr = notifyMerchant(order.NotifyURL, payload)
+	for i := 1; i <= receiveMaxRetry; i++ {
+		lastErr = receiveNotifyMerchant(order.NotifyURL, payload)
 		if lastErr == nil {
 			log.Printf("✅ Successfully notified merchant for order: %s (try %d)", msg.MOrderID, i)
 			return nil
 		}
-		log.Printf("⚠️ Notify merchant failed (try %d/%d): %v", i, maxRetry, lastErr)
+		log.Printf("⚠️ Notify merchant failed (try %d/%d): %v", i, receiveMaxRetry, lastErr)
 		time.Sleep(time.Duration(i*2) * time.Second)
 	}
-	return fmt.Errorf("failed to notify merchant %v after %d retries: %v", payload.MerchantNo, maxRetry, lastErr)
+	return fmt.Errorf("failed to notify merchant %v after %d retries: %v", payload.MerchantNo, receiveMaxRetry, lastErr)
 }
 
 // 通知商户并检查响应
-func notifyMerchant(url string, payload NotifyMerchantPayload) error {
+func receiveNotifyMerchant(url string, payload ReceiveNotifyMerchantPayload) error {
 	// 转 JSON
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -243,13 +243,13 @@ func notifyMerchant(url string, payload NotifyMerchantPayload) error {
 	// 校验返回内容必须包含 ok 或 success
 	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
 	if respStr != "ok" && respStr != "success" {
-		orderErr := updateMerchantOrder(payload.PaySerialNo, 2)
+		orderErr := receiveUpdateMerchantOrder(payload.PaySerialNo, 2)
 		if orderErr != nil {
 			return fmt.Errorf("notify merchant order update data failed: %s", respStr)
 		}
 		return fmt.Errorf("merchant response invalid: %s", respStr)
 	}
-	orderErr := updateMerchantOrder(payload.PaySerialNo, 1)
+	orderErr := receiveUpdateMerchantOrder(payload.PaySerialNo, 1)
 	if orderErr != nil {
 		return fmt.Errorf("notify merchant order update data failed: %s", orderErr)
 	}
@@ -258,7 +258,7 @@ func notifyMerchant(url string, payload NotifyMerchantPayload) error {
 }
 
 // 更新商户订单信息
-func updateMerchantOrder(orderId string, status int8) error {
+func receiveUpdateMerchantOrder(orderId string, status int8) error {
 
 	id, err := strconv.ParseUint(orderId, 10, 64)
 	if err != nil {
@@ -288,7 +288,7 @@ func updateMerchantOrder(orderId string, status int8) error {
 	return nil
 }
 
-func convertStatus(hyperfStatus string) string {
+func receiveConvertStatus(hyperfStatus string) string {
 	switch hyperfStatus {
 	case "0000":
 		return "SUCCESS"
@@ -301,7 +301,7 @@ func convertStatus(hyperfStatus string) string {
 	}
 }
 
-func getStatusMessage(status string) string {
+func receiveGetStatusMessage(status string) string {
 	switch status {
 	case "0000":
 		return "Approved 完成"
@@ -315,7 +315,7 @@ func getStatusMessage(status string) string {
 }
 
 // 转化上游订单表状态
-func getUpStatusMessage(status string) int8 {
+func receiveGetUpStatusMessage(status string) int8 {
 	switch status {
 	case "0000":
 		return 1
@@ -329,7 +329,7 @@ func getUpStatusMessage(status string) int8 {
 }
 
 // 生成签名
-func generateSign(p NotifyMerchantPayload, apiKey string) string {
+func receiveGenerateSign(p ReceiveNotifyMerchantPayload, apiKey string) string {
 	signStr := map[string]string{
 		"status":        p.Status,
 		"msg":           p.Msg,
@@ -341,7 +341,7 @@ func generateSign(p NotifyMerchantPayload, apiKey string) string {
 }
 
 // 分片表名生成器：p_order_{YYYYMM}_p{orderID % 4}
-func getOrderTable(base string, orderID uint64, t time.Time) string {
+func receiveGetOrderTable(base string, orderID uint64, t time.Time) string {
 	month := t.Format("200601")
 	shard := orderID % 4
 	return fmt.Sprintf("%s_%s_p%d", base, month, shard)

@@ -188,7 +188,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (dto.CreateOrderRes
 	upstreamRequest.MchNo = channel.UpAccount
 	upstreamRequest.NotifyUrl = req.NotifyUrl
 
-	mOrderId, upOrderNo, payUrl, err := CallUpstreamService(upstreamRequest, channel)
+	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(upstreamRequest, channel)
 	if err != nil {
 		fmt.Println("请求上游供应商失败:", err.Error())
 		return response, errors.New("请求上游供应商失败:" + err.Error())

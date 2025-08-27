@@ -32,7 +32,7 @@ func NewPayoutOrderService() *PayoutOrderService {
 	}
 }
 
-// Create 处理代收订单下单业务逻辑
+// Create 处理代付订单下单业务逻辑
 func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePayoutOrderResp, error) {
 	var response dto.CreatePayoutOrderResp
 	// 1) 主库校验
@@ -195,8 +195,11 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	upstreamRequest.IdentityType = req.IdentityType
 	upstreamRequest.IdentityNum = req.IdentityNum
 	upstreamRequest.PayMethod = req.PayMethod
+	upstreamRequest.AccName = req.AccName
+	upstreamRequest.AccNo = req.AccNo
+	upstreamRequest.Mode = "payout"
 
-	mOrderId, upOrderNo, _, err := CallUpstreamService(upstreamRequest, channel)
+	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(upstreamRequest, channel)
 	if err != nil {
 		fmt.Println("请求上游供应商失败:", err.Error())
 		return response, errors.New("请求上游供应商失败")
@@ -219,7 +222,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		return response, err
 	}
 
-	response.PaySerialNo = string(oid) //订单表编号
+	response.PaySerialNo = strconv.FormatUint(oid, 10) //订单表编号
 	response.TranFlow = req.TranFlow
 	response.SysTime = time.Now().String()
 	response.Amount = req.Amount

@@ -27,8 +27,10 @@ func main() {
 	// idgen
 	idgen.Init(1)
 
-	// start consumers
-	go mq.StartConsumers()
+	// start MQ receive consumer
+	go mq.StartReceiveConsumer()
+	// start MQ payout consumer
+	go mq.StartPayoutConsumer()
 
 	// http server
 	if config.C.Server.Mode != "debug" {
