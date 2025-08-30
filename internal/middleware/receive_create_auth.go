@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/service"
 	"wht-order-api/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -64,11 +66,29 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
 			log.Printf("商户不存在: %v", merchant)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "unauthorized"})
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,The merchant does not exist or is not activated"})
 			c.Abort()
 			return
 		}
 
+		// 获取请求IP
+		clientId := utils.GetClientIP(c)
+		if clientId == "" {
+			log.Printf("未获取到客户端IP: %+v", merchant)
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,IP Error"})
+			c.Abort()
+			return
+		}
+
+		// 验证IP是否允许
+		verifyService := service.VerifyService{}
+		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1)
+		if !canAccess {
+			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
+			c.Abort()
+			return
+		}
 		// 提取参数做签名（排除 Sign 字段）
 		params := map[string]string{
 			"version":       req.Version,

@@ -21,6 +21,20 @@ func (r *MainDao) GetMerchant(mid string) (*mainmodel.Merchant, error) {
 	return &m, nil
 }
 
+func (r *MainDao) GetMerchantWhitelist(mid uint64, mode int8) ([]mainmodel.MerchantWhitelist, error) {
+	var m []mainmodel.MerchantWhitelist
+	var query = dal.MainDB
+	if mode == 1 { //代收
+		query.Where("can_receive = ?", 1)
+	} else { //代付
+		query.Where("can_payout = ?", 1)
+	}
+	if err := query.Where("m_id=?", mid).Find(&m).Error; err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (r *MainDao) GetMerchantId(mid string) (*mainmodel.Merchant, error) {
 	var m mainmodel.Merchant
 	if err := dal.MainDB.Where("m_id=?", mid).First(&m).Error; err != nil {

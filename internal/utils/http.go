@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -67,4 +69,13 @@ func CheckUpstreamHealth(url string) error {
 		return fmt.Errorf("状态码异常: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func GetClientIP(c *gin.Context) string {
+	ip := c.GetHeader("X-Forwarded-For")
+	if ip != "" {
+		parts := strings.Split(ip, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	return c.ClientIP()
 }
