@@ -32,6 +32,7 @@ type CreatePayoutOrderResp struct {
 	PaySerialNo string `json:"pay_serial_no"` //平台流水号
 	SysTime     string `json:"sys_time"`      //系统当前日期
 	Amount      string `json:"amount"`        //订单金额
+	TraceID     string `json:"trace_id"`
 }
 
 type PayoutOrderVO struct {

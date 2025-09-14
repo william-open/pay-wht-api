@@ -60,7 +60,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		}
 
 		// 查询商户信息
-		mainDao := &dao.MainDao{}
+		mainDao := dao.NewMainDao()
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
 			log.Printf("商户不存在: %v", merchant)
@@ -79,7 +79,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		}
 
 		// 验证IP是否允许
-		verifyService := service.VerifyService{}
+		verifyService := service.NewVerifyIpWhitelistService()
 		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
 		if !canAccess {
 			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
@@ -118,7 +118,8 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		c.Set("payout_request", req) // 放入 context 供 handler 使用
+		c.Set("payout_request", req)    // 放入 context 供 handler 使用
+		c.Set("request_type", "payout") // 放入 context 供 handler 使用
 		c.Next()
 	}
 }

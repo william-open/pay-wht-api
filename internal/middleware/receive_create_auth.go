@@ -2,11 +2,11 @@ package middleware
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
+	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/service"
@@ -19,13 +19,13 @@ import (
 func ReceiveCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Only post requests are supported"})
+			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
 			c.Abort()
 			return
 		}
 
 		if c.ContentType() != "application/json" {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "Not application/json request data"})
+			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
 			c.Abort()
 			return
 		}
@@ -34,7 +34,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			log.Printf("收到回调数据: %+v\n", 222)
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "cannot read body"})
+			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInternalError))
 			c.Abort()
 			return
 		}
@@ -46,7 +46,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		var req dto.CreateOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			log.Printf("错误不能解析数据: %v", err.Error())
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid request params"})
+			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
 			c.Abort()
 			return
 		}
@@ -56,17 +56,17 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		log.Printf("请求时间: %v", tsInt)
 		if err != nil || !utils.IsTimestampValid(tsInt, 1*time.Minute) {
 			log.Printf("请求超时: %v", req.TranDatetime)
-			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "request timeout"})
+			c.JSON(http.StatusForbidden, utils.Error(constant.CodeTimeout))
 			c.Abort()
 			return
 		}
 
 		// 查询商户信息
-		mainDao := &dao.MainDao{}
+		mainDao := dao.NewMainDao()
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
 			log.Printf("商户不存在: %v", merchant)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,The merchant does not exist or is not activated"})
+			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeMerchantDisabled))
 			c.Abort()
 			return
 		}
@@ -75,17 +75,25 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		clientId := utils.GetClientIP(c)
 		if clientId == "" {
 			log.Printf("未获取到客户端IP: %+v", merchant)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,IP Error"})
+			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeUnauthorized))
 			c.Abort()
 			return
 		}
 
 		// 验证IP是否允许
-		verifyService := service.VerifyService{}
+		verifyService := service.NewVerifyIpWhitelistService()
 		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1)
 		if !canAccess {
 			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
+			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeIPNotWhitelisted))
+			c.Abort()
+			return
+		}
+		// 核查商户通道编码是否开启
+		canChannel := verifyService.VerifyChannelValid(merchant.MerchantID, req.PayType)
+		if !canChannel {
+			log.Printf("通道未启动: %+v,IP: %v", req.PayType, clientId)
+			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeChannelDisabled))
 			c.Abort()
 			return
 		}
@@ -115,12 +123,13 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		//log.Printf("待验参数: %v", params)
 		// 验签
 		if !utils.VerifySign(params, apiKey) {
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid signature"})
+			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeSignatureError))
 			c.Abort()
 			return
 		}
 		log.Printf("请求参数: %+v", req)
-		c.Set("pay_request", req) // 放入 context 供 handler 使用
+		c.Set("pay_request", req)        // 放入 context 供 handler 使用
+		c.Set("request_type", "receive") // 放入 context 供 handler 使用
 		c.Next()
 	}
 }

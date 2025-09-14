@@ -17,8 +17,8 @@ type SettlementService struct {
 
 func NewSettlementService() *SettlementService {
 	return &SettlementService{
-		mainDao:  &dao.MainDao{},
-		orderDao: &dao.OrderDao{},
+		mainDao:  dao.NewMainDao(),
+		orderDao: dao.NewOrderDao(),
 	}
 }
 

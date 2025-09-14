@@ -14,6 +14,7 @@ import (
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/service"
+	"wht-order-api/internal/shard"
 
 	"github.com/streadway/amqp"
 	"wht-order-api/internal/dal"
@@ -23,11 +24,12 @@ import (
 
 // PayoutHyperfOrderMessage 匹配 Hyperf 发送的消息格式
 type PayoutHyperfOrderMessage struct {
-	MOrderID  string          `json:"mOrderId"`  // 商户订单号
-	UpOrderID string          `json:"upOrderId"` // 平台流水号
-	Amount    decimal.Decimal `json:"amount"`    // 金额
-	Status    string          `json:"status"`    // 状态
-	Timestamp int64           `json:"timestamp"` // 时间戳
+	MOrderID    string          `json:"mOrderId"`    // 商户订单号
+	UpOrderID   string          `json:"upOrderId"`   // 平台流水号
+	Amount      decimal.Decimal `json:"amount"`      // 金额
+	UpIpAddress string          `json:"upIpAddress"` // 上游供应商回调IP(不是PHP服务IP)
+	Status      string          `json:"status"`      // 状态
+	Timestamp   int64           `json:"timestamp"`   // 时间戳
 }
 
 // PayoutNotifyMerchantPayload 通知下游商户端的回调通知信息
@@ -148,35 +150,39 @@ func payoutProcessOrderNotification(msg PayoutHyperfOrderMessage) error {
 	if err != nil {
 		return fmt.Errorf("平台对接上游的商户订单号,转换失败: %v", err)
 	}
-	txTable := getOrderTable("p_up_out_order", mOrderIdNum, time.Now())
+	txTable := shard.UpOutOrderShard.GetTable(mOrderIdNum, time.Now())
 
 	var upOrder orderModel.UpstreamTx
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
 		return fmt.Errorf("tx order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
-
+	// 验证上游供应商IP
+	if !verifyUpstreamWhitelist(upOrder.SupplierId, msg.UpIpAddress) {
+		return fmt.Errorf("the upstream supplier IP is not in the whitelist. MOrderID:%v, upstreamId:%v, ipAddress:%s", mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
+	}
 	// 更新上游订单状态
 	upOrder.Status = payoutGetUpStatusMessage(msg.Status)
 	upOrder.UpOrderNo = msg.UpOrderID
-	upOrder.NotifyTime = time.Now()
+	upOrder.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
 		return fmt.Errorf("update up_out_order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
 
 	// 根据商户订单号查找订单
 	var order orderModel.MerchantOrder
-	orderTable := getOrderTable("p_out_order", upOrder.OrderID, time.Now())
+	orderTable := shard.OutOrderShard.GetTable(upOrder.OrderID, time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
 		return fmt.Errorf("merchant order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
 	order.Status = payoutGetUpStatusMessage(msg.Status)
-	order.NotifyTime = time.Now()
+	order.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).Updates(&order).Error; err != nil {
 		return fmt.Errorf("update order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
 	var mainDao *dao.MainDao
+	mainDao = dao.NewMainDao()
 	merchant, err := mainDao.GetMerchantId(upOrder.MerchantID)
 	if err != nil || merchant == nil || merchant.Status != 1 {
 		return fmt.Errorf("merchant not found or inactive: %v", err)
@@ -184,7 +190,7 @@ func payoutProcessOrderNotification(msg PayoutHyperfOrderMessage) error {
 
 	// 如果订单成功就结算商户与代理分润
 	if payoutConvertStatus(msg.Status) == "SUCCESS" {
-		var settleService = &service.SettlementService{}
+		var settleService = service.NewSettlementService()
 		var settlementResult dto.SettlementResult
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
 		err := settleService.Settlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
@@ -267,7 +273,7 @@ func payoutUpdateMerchantOrder(orderId string, status int8) error {
 	}
 
 	// 计算分表表名
-	orderTable := getOrderTable("p_out_order", id, time.Now())
+	orderTable := shard.OutOrderShard.GetTable(id, time.Now())
 	// 这里必须有更新字段，例如更新状态、更新时间
 	updateData := map[string]interface{}{
 		"notify_status": status,
@@ -276,9 +282,9 @@ func payoutUpdateMerchantOrder(orderId string, status int8) error {
 	}
 	if status == 1 { //支付成功时标识完成
 		updateData["finish_time"] = time.Now()
-		updateData["status"] = 1
-	} else {
 		updateData["status"] = 2
+	} else {
+		updateData["status"] = 3
 	}
 
 	// 更新数据库
@@ -319,11 +325,11 @@ func payoutGetStatusMessage(status string) string {
 func payoutGetUpStatusMessage(status string) int8 {
 	switch status {
 	case "0000":
-		return 1
-	case "0001":
-		return 0
-	case "0005":
 		return 2
+	case "0001":
+		return 1
+	case "0005":
+		return 3
 	default:
 		return -1
 	}
@@ -339,11 +345,4 @@ func payoutGenerateSign(p PayoutNotifyMerchantPayload, apiKey string) string {
 		"amount":        p.Amount,
 	}
 	return utils.GenerateSign(signStr, apiKey)
-}
-
-// 分片表名生成器：p_out_order_{YYYYMM}_p{orderID % 4}
-func getOrderTable(base string, orderID uint64, t time.Time) string {
-	month := t.Format("200601")
-	shard := orderID % 4
-	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
 }

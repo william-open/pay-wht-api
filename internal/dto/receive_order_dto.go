@@ -36,6 +36,7 @@ type CreateOrderResp struct {
 	Yul3        string      `json:"yul3"`
 	Yul4        string      `json:"yul4"`
 	Yul5        string      `json:"yul5"`
+	TraceID     string      `json:"trace_id"`
 }
 
 type OrderVO struct {

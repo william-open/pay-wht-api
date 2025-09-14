@@ -5,6 +5,7 @@ import (
 	"log"
 	"runtime/debug"
 	"time"
+	"wht-order-api/internal/dto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,7 +16,9 @@ func Recover() gin.HandlerFunc {
 			if r := recover(); r != nil {
 				log.Printf("panic recovered: %v\n", r)
 				debug.PrintStack() // 打印完整堆栈，包含文件名和行号
-				c.JSON(500, gin.H{"code": 500, "msg": "internal error"})
+				ctxVal, _ := c.Get("audit_ctx")
+				auditCtx := ctxVal.(*dto.AuditContextPayload)
+				c.JSON(500, gin.H{"code": 500, "msg": "system internal error", "trace_id": auditCtx.TraceID})
 				c.Abort()
 			}
 		}()

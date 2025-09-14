@@ -44,4 +44,4 @@ type PayUpstream struct {
 	RsaPublicKey   *string         `gorm:"column:rsa_public_key;type:varchar(500)" json:"rsaPublicKey"`            // RSA公钥
 }
 
-func (PayUpstream) TableName() string { return "w_pay_upstream" }
+func (PayUpstream) TableName() string { return "w_upstream" }

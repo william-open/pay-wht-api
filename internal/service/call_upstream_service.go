@@ -1,23 +1,26 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
+	"strings"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/utils"
 )
 
-// CallUpstreamReceiveService 调用 PHP 服务下单-代收
-func CallUpstreamReceiveService(req dto.UpstreamRequest, channel *dto.PaymentChannelVo) (string, string, string, error) {
+// CallUpstreamReceiveService 调用 PHP 服务下单-代收 调用上游服务下单-代收（支持上下文超时控制）
+func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (string, string, string, error) {
 	// 组装请求参数
 	params := map[string]interface{}{
 		"mchNo":       req.MchNo,
 		"amount":      req.Amount,
 		"currency":    req.Currency,
 		"returnUrl":   req.RedirectUrl,
-		"payType":     channel.UpstreamCode,
+		"payType":     req.UpstreamCode, // 注意：这是上游通道编码
 		"mchOrderId":  req.MchOrderId,
 		"productInfo": req.ProductInfo,
 		"apiKey":      req.ApiKey,
@@ -29,60 +32,91 @@ func CallUpstreamReceiveService(req dto.UpstreamRequest, channel *dto.PaymentCha
 		"bankCode":    req.BankCode,
 		"bankName":    req.BankName,
 		"mode":        req.Mode,
+		"notifyUrl":   req.NotifyUrl, // 添加通知URL
 	}
 
 	upstreamUrl := config.C.Upstream.ReceiveApiUrl
-	log.Printf("[Upstream] 请求地址: %s", upstreamUrl)
-	log.Printf("[Upstream] 请求参数: %+v", params)
+	log.Printf("[Upstream-Receive] 请求地址: %s,请求参数: %+v", upstreamUrl, params)
 
-	// ✅ 检测上游是否可访问（HEAD 请求）
-	if err := utils.CheckUpstreamHealth(upstreamUrl); err != nil {
-		log.Printf("[Upstream] 健康检查失败: %v", err)
+	// ✅ 检测上游是否可访问（带超时）
+	if err := utils.CheckUpstreamHealth(ctx, upstreamUrl); err != nil {
+		log.Printf("[Upstream-Receive] 健康检查失败: %v", err)
 		return "", "", "", fmt.Errorf("上游服务不可用: %v", err)
 	}
 
-	// ✅ 发起请求
-	resp, err := utils.HttpPostJson(upstreamUrl, params)
+	// ✅ 发起请求（带上下文和超时控制）
+	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamUrl, params)
 	if err != nil {
-		log.Printf("[Upstream] 请求失败: %v", err)
+		log.Printf("[Upstream-Receive] 请求失败: %v", err)
 		return "", "", "", fmt.Errorf("请求上游失败: %v", err)
 	}
-	log.Printf("[Upstream] 响应原始数据: %s", resp)
+	log.Printf("[Upstream-Receive] 响应原始数据: %s", resp)
 
-	// ✅ 解析响应
-	var data struct {
-		Code interface{} `json:"code"`
-		Msg  string      `json:"msg"`
+	// ✅ 定义响应结构
+	var response struct {
+		Code string `json:"code"` // 顶层code（无用）
+		Msg  string `json:"msg"`
 		Data struct {
+			Code      string `json:"code"` // ✅ 实际判断的字段
+			Msg       string `json:"msg"`
 			UpOrderNo string `json:"up_order_no"`
 			PayUrl    string `json:"pay_url"`
 			MOrderId  string `json:"m_order_id"`
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal([]byte(resp), &data); err != nil {
-		log.Printf("[Upstream] JSON解析失败: %v", err)
+	// ✅ JSON解析
+	if err := json.Unmarshal([]byte(resp), &response); err != nil {
+		log.Printf("[Upstream-Receive] JSON解析失败: %v, 原始响应: %s", err, resp)
 		return "", "", "", fmt.Errorf("响应解析失败: %v", err)
 	}
 
-	if data.Code != string('0') {
-		log.Printf("[Upstream] 上游返回错误: %s", data.Msg)
-		return "", "", "", fmt.Errorf("上游错误: %s", data.Msg)
+	// ✅ 只认 data.code == "0" 成功
+	if response.Code != "0" {
+		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
+		return "", "", "", fmt.Errorf("上游错误[%s]: %s", response.Data.Code, response.Data.Msg)
 	}
+	if response.Data.PayUrl == "" && !isValidURL(response.Data.PayUrl) {
+		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
+		return "", "", "", fmt.Errorf("上游错误[%s]: %s", response.Data.Code, response.Data.Msg)
+	}
+	// ✅ 成功日志
+	log.Printf("[Upstream-Receive] 收单下单成功, upOrderNo=%s, payUrl=%s, mOrderId=%s",
+		response.Data.UpOrderNo, response.Data.PayUrl, response.Data.MOrderId)
 
-	log.Printf("[Upstream] 下单成功,响应数据: upOrderNo=%+v, payUrl=%+v,mOrderId:%+v", data.Data.UpOrderNo, data.Data.PayUrl, data.Data.MOrderId)
-	return data.Data.MOrderId, data.Data.UpOrderNo, data.Data.PayUrl, nil
+	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
+}
+
+// isSuccessCode 检查响应码是否为成功（支持字符串和数字类型）
+func isSuccessCode(code interface{}) bool {
+	switch v := code.(type) {
+	case string:
+		return v == "0" || v == "0000" || v == "success" || v == "SUCCESS"
+	case int:
+		return v == 0 || v == 200
+	case float64:
+		return v == 0 || v == 200
+	default:
+		return false
+	}
+}
+
+// Go 内置的 net/url 包校验是否是合法 URL
+func isValidURL(u string) bool {
+	parsed, err := url.ParseRequestURI(u)
+	return err == nil && (strings.HasPrefix(parsed.Scheme, "http"))
 }
 
 // CallUpstreamPayoutService 调用 PHP 服务下单 -代付
-func CallUpstreamPayoutService(req dto.UpstreamRequest, channel *dto.PaymentChannelVo) (string, string, string, error) {
+// CallUpstreamPayoutService 调用上游服务下单-代付（支持上下文超时控制）
+func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (string, string, string, error) {
 	// 组装请求参数
 	params := map[string]interface{}{
 		"mchNo":        req.MchNo,
 		"amount":       req.Amount,
 		"currency":     req.Currency,
 		"returnUrl":    req.RedirectUrl,
-		"payType":      channel.UpstreamCode,
+		"payType":      req.UpstreamCode, // 使用通道的上游编码
 		"mchOrderId":   req.MchOrderId,
 		"productInfo":  req.ProductInfo,
 		"apiKey":       req.ApiKey,
@@ -97,47 +131,62 @@ func CallUpstreamPayoutService(req dto.UpstreamRequest, channel *dto.PaymentChan
 		"identityType": req.IdentityType,
 		"identityNum":  req.IdentityNum,
 		"mode":         req.Mode,
+		"notifyUrl":    req.NotifyUrl, // 添加通知URL
 	}
 
 	upstreamUrl := config.C.Upstream.PayoutApiUrl
-	log.Printf("[Upstream] 请求地址: %s", upstreamUrl)
-	log.Printf("[Upstream] 请求参数: %+v", params)
+	log.Printf("[Upstream-Payout] 请求地址: %s", upstreamUrl)
+	log.Printf("[Upstream-Payout] 请求参数: %+v", params)
 
-	// ✅ 检测上游是否可访问（HEAD 请求）
-	if err := utils.CheckUpstreamHealth(upstreamUrl); err != nil {
-		log.Printf("[Upstream] 健康检查失败: %v", err)
+	// ✅ 检测上游是否可访问（带超时）
+	if err := utils.CheckUpstreamHealth(ctx, upstreamUrl); err != nil {
+		log.Printf("[Upstream-Payout] 健康检查失败: %v", err)
 		return "", "", "", fmt.Errorf("上游服务不可用: %v", err)
 	}
 
-	// ✅ 发起请求
-	resp, err := utils.HttpPostJson(upstreamUrl, params)
+	// ✅ 发起请求（带上下文和超时控制）
+	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamUrl, params)
 	if err != nil {
-		log.Printf("[Upstream] 请求失败: %v", err)
+		log.Printf("[Upstream-Payout] 请求失败: %v", err)
 		return "", "", "", fmt.Errorf("请求上游失败: %v", err)
 	}
-	log.Printf("[Upstream] 响应原始数据: %s", resp)
+	log.Printf("[Upstream-Payout] 响应原始数据: %s", resp)
 
 	// ✅ 解析响应
-	var data struct {
-		Code interface{} `json:"code"`
+	var response struct {
+		Code interface{} `json:"code"` // 使用interface{}因为上游可能返回字符串或数字
 		Msg  string      `json:"msg"`
 		Data struct {
 			UpOrderNo string `json:"up_order_no"`
 			PayUrl    string `json:"pay_url"`
 			MOrderId  string `json:"m_order_id"`
+			Status    string `json:"status"`   // 代付可能有状态返回
+			Fee       string `json:"fee"`      // 代付手续费
+			TradeNo   string `json:"trade_no"` // 交易号
+			Code      string `json:"code"`     // code编码
+			Msg       string `json:"msg"`      // 上游返回错误信息
 		} `json:"data"`
 	}
 
-	if err := json.Unmarshal([]byte(resp), &data); err != nil {
-		log.Printf("[Upstream] JSON解析失败: %v", err)
+	if err := json.Unmarshal([]byte(resp), &response); err != nil {
+		log.Printf("[Upstream-Payout] JSON解析失败: %v, 原始响应: %s", err, resp)
 		return "", "", "", fmt.Errorf("响应解析失败: %v", err)
 	}
 
-	if data.Code != string('0') {
-		log.Printf("[Upstream] 上游返回错误: %s", data.Msg)
-		return "", "", "", fmt.Errorf("上游错误: %s", data.Msg)
+	// 检查响应码（支持字符串和数字类型）
+	if !isSuccessCode(response.Code) {
+		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
+		return "", "", "", fmt.Errorf("上游错误[%v]: %s", response.Code, response.Msg)
+	}
+	// ✅ 只认 data.code == "0" 成功
+	log.Printf("[Upstream-Payout]上游供应商返回code: %s", response.Data.Code)
+	if response.Code != "0" || response.Data.Code != "0" {
+		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
+		return "", "", "", fmt.Errorf("上游错误[%v]: %v", response.Code, response.Data.Msg)
 	}
 
-	log.Printf("[Upstream] 下单成功,响应数据: upOrderNo=%+v, payUrl=%+v,mOrderId:%+v", data.Data.UpOrderNo, data.Data.PayUrl, data.Data.MOrderId)
-	return data.Data.MOrderId, data.Data.UpOrderNo, data.Data.PayUrl, nil
+	log.Printf("[Upstream-Payout] 代付下单成功, upOrderNo=%s, mOrderId=%s, status=%s",
+		response.Data.UpOrderNo, response.Data.MOrderId, response.Data.Status)
+
+	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
 }

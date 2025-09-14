@@ -14,15 +14,15 @@ type AccountService struct {
 
 func NewAccountService() *AccountService {
 	return &AccountService{
-		mainDao:  &dao.MainDao{},
-		orderDao: &dao.OrderDao{},
+		mainDao:  dao.NewMainDao(),
+		orderDao: dao.NewOrderDao(),
 	}
 }
 
 func (s *AccountService) Get(mId string, currency string) (dto.AccountResp, error) {
 	var resp dto.AccountResp
 	// 查询商户信息
-	mainDao := &dao.MainDao{}
+	mainDao := dao.NewMainDao()
 	merchant, _ := mainDao.GetMerchant(mId)
 	if merchant.Status != 1 {
 		log.Printf("商户不存在: %v", merchant)

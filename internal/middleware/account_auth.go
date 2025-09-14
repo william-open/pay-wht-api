@@ -58,7 +58,7 @@ func AccountAuth() gin.HandlerFunc {
 		}
 
 		// 查询商户信息
-		mainDao := &dao.MainDao{}
+		mainDao := dao.NewMainDao()
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
 			log.Printf("商户不存在: %v", merchant)
@@ -67,9 +67,28 @@ func AccountAuth() gin.HandlerFunc {
 			return
 		}
 
+		// 获取请求IP
+		clientId := utils.GetClientIP(c)
+		if clientId == "" {
+			log.Printf("未获取到客户端IP: %+v", merchant)
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,IP Error"})
+			c.Abort()
+			return
+		}
+
+		// 验证IP是否允许
+		//verifyService := service.NewVerifyIpWhitelistService()
+		//canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
+		//if !canAccess {
+		//	log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+		//	c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
+		//	c.Abort()
+		//	return
+		//}
 		// 提取参数做签名（排除 Sign 字段）
 		params := map[string]string{
 			"version":       req.Version,
+			"currency":      req.Currency,
 			"merchant_no":   req.MerchantNo,
 			"tran_datetime": req.TranDatetime,
 			"sign":          req.Sign,

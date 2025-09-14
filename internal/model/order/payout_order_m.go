@@ -69,9 +69,9 @@ type MerchantPayOutOrderM struct {
 	UpOrderID      *uint64              `gorm:"column:up_order_id" json:"upOrderId"`                                  // 上游交易订单ID
 	ChannelID      int64                `gorm:"column:channel_id;not null" json:"channelId"`                          // 系统支付渠道ID
 	UpChannelID    int64                `gorm:"column:up_channel_id;not null" json:"upChannelId"`                     // 上游通道ID
-	NotifyTime     time.Time            `gorm:"column:notify_time;not null" json:"notifyTime"`                        // 回调通知时间
-	CreateTime     time.Time            `gorm:"column:create_time;autoCreateTime;not null" json:"createTime"`         // 创建时间
-	UpdateTime     time.Time            `gorm:"column:update_time;autoUpdateTime;not null" json:"updateTime"`         // 更新时间
+	NotifyTime     *time.Time           `gorm:"column:notify_time;not null" json:"notifyTime"`                        // 回调通知时间
+	CreateTime     *time.Time           `gorm:"column:create_time;autoCreateTime;not null" json:"createTime"`         // 创建时间
+	UpdateTime     *time.Time           `gorm:"column:update_time;autoUpdateTime;not null" json:"updateTime"`         // 更新时间
 	FinishTime     *time.Time           `gorm:"column:finish_time" json:"finishTime"`                                 // 完成时间
 	MTitle         *string              `gorm:"column:m_title;type:varchar(30)" json:"mTitle"`                        // 商户名称
 	ChannelCode    *string              `gorm:"column:channel_code;type:varchar(30)" json:"channelCode"`              // 通道编码

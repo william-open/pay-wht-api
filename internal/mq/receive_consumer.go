@@ -7,6 +7,7 @@ import (
 	"github.com/shopspring/decimal"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/service"
+	"wht-order-api/internal/shard"
 
 	"github.com/streadway/amqp"
 	"wht-order-api/internal/dal"
@@ -23,11 +25,12 @@ import (
 
 // ReceiveHyperfOrderMessage 匹配 Hyperf 发送的消息格式
 type ReceiveHyperfOrderMessage struct {
-	MOrderID  string          `json:"mOrderId"`  // 商户订单号
-	UpOrderID string          `json:"upOrderId"` // 平台流水号
-	Amount    decimal.Decimal `json:"amount"`    // 金额
-	Status    string          `json:"status"`    // 状态
-	Timestamp int64           `json:"timestamp"` // 时间戳
+	MOrderID    string          `json:"mOrderId"`    // 商户订单号
+	UpOrderID   string          `json:"upOrderId"`   // 平台流水号
+	Amount      decimal.Decimal `json:"amount"`      // 金额
+	Status      string          `json:"status"`      // 状态
+	UpIpAddress string          `json:"upIpAddress"` // 上游供应商回调IP(不是PHP服务IP)
+	Timestamp   int64           `json:"timestamp"`   // 时间戳
 }
 
 // ReceiveNotifyMerchantPayload 通知下游商户端的回调通知信息
@@ -147,30 +150,44 @@ func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 	if err != nil {
 		return fmt.Errorf("平台对接上游的商户订单号,转换失败: %v", err)
 	}
-	txTable := getOrderTable("p_up_order", mOrderIdNum, time.Now())
+	txTable := shard.UpOrderShard.GetTable(mOrderIdNum, time.Now())
 
 	var upOrder orderModel.UpstreamTx
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
 		return fmt.Errorf("tx order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
-
+	// 验证上游供应商IP
+	if !verifyUpstreamWhitelist(upOrder.SupplierId, msg.UpIpAddress) {
+		return fmt.Errorf("the upstream supplier IP is not in the whitelist. MOrderID:%v, upstreamId:%v, ipAddress:%s", mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
+	}
 	// 更新上游订单状态
 	upOrder.Status = receiveGetUpStatusMessage(msg.Status)
 	upOrder.UpOrderNo = msg.UpOrderID
-	upOrder.NotifyTime = time.Now()
+	upOrder.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
 		return fmt.Errorf("update up_order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
-
+	// 判断一下交易金额是否正确
+	if msg.Amount.Cmp(upOrder.Amount) != 0 {
+		return fmt.Errorf("incorrect transaction amount with MOrderID %v: callback amount:%v:up order amount:%v", mOrderIdNum, msg.Amount, upOrder.Amount)
+	}
 	// 根据商户订单号查找订单
 	var order orderModel.MerchantOrder
-	orderTable := getOrderTable("p_order", upOrder.OrderID, time.Now())
+	orderTable := shard.OrderShard.GetTable(upOrder.OrderID, time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
 		return fmt.Errorf("merchant order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
+	// 如果商户订单status状态>1,表示已经收到上游回调处理
+	if order.Status > 1 {
+		return fmt.Errorf("upstream callback merchant order  have handled with MOrderID %v,order status is: %v", upOrder.OrderID, order.Status)
+	}
+	// 判断一下交易金额是否正确
+	if msg.Amount.Cmp(order.Amount) != 0 {
+		return fmt.Errorf("incorrect transaction amount with MOrderID %v: callback amount:%v:order amount:%v", mOrderIdNum, msg.Amount, order.Amount)
+	}
 	order.Status = receiveGetUpStatusMessage(msg.Status)
-	order.NotifyTime = time.Now()
+	order.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).Updates(&order).Error; err != nil {
 		return fmt.Errorf("update order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
@@ -216,6 +233,32 @@ func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 		time.Sleep(time.Duration(i*2) * time.Second)
 	}
 	return fmt.Errorf("failed to notify merchant %v after %d retries: %v", payload.MerchantNo, receiveMaxRetry, lastErr)
+}
+
+// verifyUpstreamWhitelist 校验上游供应商IP白名单
+func verifyUpstreamWhitelist(upstreamId uint64, ipAddress string) bool {
+	var mainDao *dao.MainDao
+	mainDao = dao.NewMainDao()
+	upstream, err := mainDao.GetUpstreamWhitelist(upstreamId)
+	if err != nil || upstream == nil || upstream.Status != 1 {
+		return false
+	}
+	// 构建白名单集合
+	allowed := make(map[string]struct{})
+	ipList := strings.Split(upstream.IpWhitelist, ",")
+	for _, ip := range ipList {
+		ip = strings.TrimSpace(ip)
+		if net.ParseIP(ip) != nil {
+			allowed[ip] = struct{}{}
+		}
+	}
+
+	// 验证请求 IP 是否允许
+	if _, ok := allowed[ipAddress]; !ok {
+		return false
+	}
+
+	return true
 }
 
 // 通知商户并检查响应
@@ -266,7 +309,7 @@ func receiveUpdateMerchantOrder(orderId string, status int8) error {
 	}
 
 	// 计算分表表名
-	orderTable := getOrderTable("p_order", id, time.Now())
+	orderTable := shard.OrderShard.GetTable(id, time.Now())
 	// 这里必须有更新字段，例如更新状态、更新时间
 	updateData := map[string]interface{}{
 		"notify_status": status,
@@ -275,9 +318,9 @@ func receiveUpdateMerchantOrder(orderId string, status int8) error {
 	}
 	if status == 1 { //支付成功时标识完成
 		updateData["finish_time"] = time.Now()
-		updateData["status"] = 1
-	} else {
 		updateData["status"] = 2
+	} else {
+		updateData["status"] = 3
 	}
 
 	// 更新数据库
@@ -318,11 +361,11 @@ func receiveGetStatusMessage(status string) string {
 func receiveGetUpStatusMessage(status string) int8 {
 	switch status {
 	case "0000":
-		return 1
-	case "0001":
-		return 0
-	case "0005":
 		return 2
+	case "0001":
+		return 1
+	case "0005":
+		return 3
 	default:
 		return -1
 	}
@@ -338,11 +381,4 @@ func receiveGenerateSign(p ReceiveNotifyMerchantPayload, apiKey string) string {
 		"amount":        p.Amount,
 	}
 	return utils.GenerateSign(signStr, apiKey)
-}
-
-// 分片表名生成器：p_order_{YYYYMM}_p{orderID % 4}
-func receiveGetOrderTable(base string, orderID uint64, t time.Time) string {
-	month := t.Format("200601")
-	shard := orderID % 4
-	return fmt.Sprintf("%s_%s_p%d", base, month, shard)
 }

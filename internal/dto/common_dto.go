@@ -28,7 +28,7 @@ type NotifyMerchantPayload struct {
 	Amount      decimal.Decimal `json:"amount"`
 }
 
-// 请求上游供应商参数 UpstreamRequest
+// UpstreamRequest 请求上游供应商参数
 type UpstreamRequest struct {
 	MchNo        string `json:"mchNo" binding:"required"`          //商户号
 	ApiKey       string `json:"apiKey" binding:"required"`         //商户密钥
@@ -51,6 +51,7 @@ type UpstreamRequest struct {
 	IdentityNum  string `json:"identityNum"`                       //证件号
 	PayMethod    string `json:"payMethod"`                         //支付方式
 	Mode         string `json:"mode"`                              //模式 receive payout
+	UpstreamCode string `json:"upstreamCode"`                      //上游供应商通道编码
 
 }
 
@@ -85,7 +86,7 @@ type QueryAgentMerchant struct {
 	Currency     string `json:"currency"`     // 货币符号
 }
 
-// PaymentChannelVo 支付通道信息
+// PaymentChannelVo 支付通道信息 值对象
 type PaymentChannelVo struct {
 	MDefaultRate      decimal.Decimal `json:"mDefaultRate"` // 商户通道费率
 	MSingleFee        decimal.Decimal `json:"mSingleFee"`   // 商户通道固定费用
@@ -107,5 +108,95 @@ type PaymentChannelVo struct {
 	UpChannelRate     decimal.Decimal `json:"upChannelRate"`     // 上游通道费率
 	UpChannelFixedFee string          `json:"upChannelFixedFee"` // 上游通道固定费用
 	SysChannelTitle   string          `json:"sysChannelTitle"`   // 系统通道名称
-	Country           string          `json:"country"`           // 系统通道名称
+	Country           string          `json:"country"`           // 国家
+}
+
+// SinglePayChannelVo 单独支付通道信息
+type SinglePayChannelVo struct {
+	MDefaultRate       decimal.Decimal `json:"mDefaultRate"`       // 商户通道费率
+	MSingleFee         decimal.Decimal `json:"mSingleFee"`         // 商户通道固定费用
+	FixedAmount        string          `json:"fixedAmount"`        // 固定可用金额多个值使用英文逗号分隔
+	MinAmount          decimal.Decimal `json:"minAmount"`          //上游通道风控最小金额
+	MaxAmount          decimal.Decimal `json:"maxAmount"`          //上游通道风控最大金额
+	UpCostRate         decimal.Decimal `json:"upCostRate"`         //上游通道成本费率
+	UpCostFee          decimal.Decimal `json:"upCostFee"`          //上游通道成本固定费用
+	SuccessRate        decimal.Decimal `json:"successRate"`        //上游通道成功率
+	UpstreamId         int64           `json:"upstreamId"`         //上游供应商ID
+	UpstreamCode       string          `json:"upstreamCode"`       //上游通道编码
+	SysChannelID       int64           `json:"sysChannelId"`       // 系统通道编码ID
+	SysChannelCode     string          `json:"sysChannelCode"`     // 系统通道编码
+	Status             int8            `json:"status"`             // 状态1:开启0:关闭
+	Type               int8            `json:"type"`               // 通道类型：1:代收2:代付
+	UpChannelProductId int64           `json:"upChannelProductId"` // 上游通道产品ID 也就是w_pay_product表的ID
+	UpAccount          string          `json:"upAccount"`          // 上游商户号
+	UpApiKey           string          `json:"upApiKey"`           // 上游APIKEY密钥
+	Currency           string          `json:"currency"`           // 货币符号
+	Country            string          `json:"country"`            // 国家
+}
+
+type ChannelInfo struct {
+	// 系统通道信息
+	SysChannelID   int64  // 系统通道编码ID
+	SysChannelCode string // 系统通道编码
+
+	// 上游通道信息
+	UpstreamId     int             // 上游供应商ID
+	UpstreamCode   string          // 上游通道编码
+	UpChannelId    int64           // 上游通道产品ID（w_pay_product.id）
+	UpChannelTitle string          // 上游通道名称（展示用）
+	UpChannelRate  decimal.Decimal // 上游通道费率
+	UpSingleFee    decimal.Decimal // 上游通道单笔费用
+
+	// 商户通道信息
+	MDefaultRate decimal.Decimal // 商户默认费率
+	MSingleFee   decimal.Decimal // 商户单笔费用
+
+	// 通道调度信息
+	InterfaceCode string // 接口对接编码（用于上游调用调度服务）
+	DispatchMode  int    // 调度模式：1=轮询权重，2=固定通道
+	Weight        int    // 权重值（轮询排序用）
+
+	// 其他信息
+	Currency    string  // 币种
+	Country     string  // 国家（可选）
+	UpAccount   string  // 上游账号（商户编号）
+	UpApiKey    string  // 上游API Key
+	ChannelCode *string // 通道编码（用于上游请求）
+}
+
+type PayProductVo struct {
+	ID              int64
+	Title           string
+	Currency        string
+	Type            int8
+	UpstreamId      int64
+	UpstreamCode    string
+	UpChannelTitle  string
+	InterfaceID     int
+	SysChannelID    int64
+	SysChannelCode  string
+	SysChannelTitle string
+	// 商户通道信息
+	MDefaultRate decimal.Decimal // 商户默认费率
+	MSingleFee   decimal.Decimal // 商户单笔费用
+	Status       int
+	CostRate     decimal.Decimal
+	CostFee      decimal.Decimal
+	MinAmount    *decimal.Decimal
+	MaxAmount    *decimal.Decimal
+	FixedAmount  string
+	SuccessRate  decimal.Decimal
+	UpAccount    string
+	UpApiKey     string
+	UpdateBy     string
+	Country      string
+	// 新增字段：从商户通道表中联查的权重
+	UpstreamWeight int    `gorm:"column:upstream_weight"`
+	InterfaceCode  string `gorm:"column:interface_code"`
+}
+
+// VerifyUpstream 验证上游供应商信息
+type VerifyUpstream struct {
+	IpWhitelist string `json:"ipWhitelist"`
+	Status      int8   `json:"status"`
 }

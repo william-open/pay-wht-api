@@ -1,73 +1,103 @@
 package utils
 
 import (
-	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"io"
-	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-// HttpPostJson 发送 POST JSON 请求
-func HttpPostJson(url string, data interface{}) (string, error) {
-	// 将参数序列化为 JSON
+// HttpPostJsonWithContext 发送带上下文的HTTP POST JSON请求
+func HttpPostJsonWithContext(ctx context.Context, url string, data interface{}) (string, error) {
+	// 创建HTTP客户端（带超时设置）
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // 跳过证书验证
+			MaxIdleConns:    100,
+			MaxConnsPerHost: 100,
+			IdleConnTimeout: 90 * time.Second,
+		},
+	}
+
+	// 将数据转换为JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
-		return "", fmt.Errorf("marshal json error: %v", err)
+		return "", fmt.Errorf("JSON编码失败: %w", err)
 	}
 
-	log.Printf("请求上游URL: %v,请求上游参数: %v", url, string(jsonData))
-	// 创建 HTTP 客户端（超时 10s）
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	// 构建请求
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	// 创建请求
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonData)))
 	if err != nil {
-		return "", fmt.Errorf("new request error: %v", err)
+		return "", fmt.Errorf("创建请求失败: %w", err)
 	}
+
+	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "WHT-Order-API/1.0")
 
 	// 发送请求
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("http request error: %v", err)
+		return "", fmt.Errorf("HTTP请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应内容
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response error: %v", err)
+	// 检查响应状态码
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP错误: %s", resp.Status)
 	}
 
-	// 如果状态码不是 200，返回错误
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("bad status code: %d, body: %s", resp.StatusCode, string(body))
+	// 读取响应体
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	return string(body), nil
 }
 
-func CheckUpstreamHealth(url string) error {
-	log.Printf("请求检测地址: %v", url)
-	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequest("POST", url, nil)
+// CheckUpstreamHealth 检查上游服务健康状态
+func CheckUpstreamHealth(ctx context.Context, upstreamUrl string) error {
+	// 解析URL
+	parsedUrl, err := url.Parse(upstreamUrl)
 	if err != nil {
-		return err
+		return fmt.Errorf("URL解析失败: %w", err)
 	}
+
+	// 创建健康检查URL（使用HEAD方法）
+	healthUrl := fmt.Sprintf("%s://%s", parsedUrl.Scheme, parsedUrl.Host)
+
+	// 创建带超时的客户端
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// 创建HEAD请求
+	req, err := http.NewRequestWithContext(ctx, "HEAD", healthUrl, nil)
+	if err != nil {
+		return fmt.Errorf("创建健康检查请求失败: %w", err)
+	}
+
+	// 发送健康检查请求
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("健康检查失败: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// 检查响应状态码
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("状态码异常: %d", resp.StatusCode)
+		return fmt.Errorf("上游服务异常: %s", resp.Status)
 	}
+
 	return nil
 }
 
