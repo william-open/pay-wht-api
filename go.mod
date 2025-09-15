@@ -2,7 +2,6 @@ module wht-order-api
 
 go 1.24.0
 
-toolchain go1.24.4
 
 require (
 	github.com/bwmarrin/snowflake v0.3.0

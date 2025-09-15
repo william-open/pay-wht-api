@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"github.com/go-playground/validator/v10"
 	"io"
 	"log"
 	"net/http"
@@ -43,8 +45,30 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		// 解析 JSON
 		var req dto.CreatePayoutOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("错误不能解析数据: %v", err.Error())
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "invalid request params"})
+			// 判断是否为字段验证错误 validator.ValidationErrors 类型断言，并逐项提取字段名与错误原因
+			var ve validator.ValidationErrors
+			if errors.As(err, &ve) {
+				errFields := make([]map[string]string, 0)
+				for _, fe := range ve {
+					errFields = append(errFields, map[string]string{
+						"field": fe.Field(),              // 字段名
+						"error": utils.ValidationMsg(fe), // 错误信息
+					})
+				}
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code":   400,
+					"msg":    "参数校验失败",
+					"errors": errFields,
+				})
+				c.Abort()
+				return
+			}
+
+			// 非字段错误（如 JSON 格式错误）
+			c.JSON(http.StatusBadRequest, gin.H{
+				"code": 400,
+				"msg":  "请求格式错误: " + err.Error(),
+			})
 			c.Abort()
 			return
 		}

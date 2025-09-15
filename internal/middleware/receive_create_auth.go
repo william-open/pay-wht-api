@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
+	"github.com/go-playground/validator/v10"
 	"io"
 	"log"
 	"net/http"
@@ -9,6 +12,7 @@ import (
 	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/service"
 	"wht-order-api/internal/utils"
 
@@ -45,10 +49,31 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		// 解析 JSON
 		var req dto.CreateOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
+			// 判断是否为字段验证错误 validator.ValidationErrors 类型断言，并逐项提取字段名与错误原因
+			var ve validator.ValidationErrors
+			if errors.As(err, &ve) {
+				errFields := make([]map[string]string, 0)
+				for _, fe := range ve {
+					errFields = append(errFields, map[string]string{
+						"field": fe.Field(),              // 字段名
+						"error": utils.ValidationMsg(fe), // 错误信息
+					})
+				}
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code":   400,
+					"msg":    "参数校验失败",
+					"errors": errFields,
+				})
+				c.Abort()
+				return
+			}
+
+			// 非字段错误（如 JSON 格式错误）
 			log.Printf("错误不能解析数据: %v", err.Error())
 			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
 			c.Abort()
 			return
+
 		}
 
 		// 4️⃣ 校验 timestamp 和 nonce
@@ -84,7 +109,13 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		verifyService := service.NewVerifyIpWhitelistService()
 		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1)
 		if !canAccess {
-			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+			errorTipText := fmt.Sprintf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+			go func() {
+				err := notify.SendTelegramMessage(merchant.TelegramGroupChatId, errorTipText)
+				if err != nil {
+
+				}
+			}()
 			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeIPNotWhitelisted))
 			c.Abort()
 			return
@@ -123,6 +154,13 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		//log.Printf("待验参数: %v", params)
 		// 验签
 		if !utils.VerifySign(params, apiKey) {
+			errorTipText := utils.Error(constant.CodeSignatureError).Msg
+			go func() {
+				err := notify.SendTelegramMessage(merchant.TelegramGroupChatId, errorTipText)
+				if err != nil {
+
+				}
+			}()
 			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeSignatureError))
 			c.Abort()
 			return

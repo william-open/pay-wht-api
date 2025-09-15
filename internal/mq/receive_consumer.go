@@ -180,7 +180,7 @@ func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 
 	// 如果商户订单status状态>1,表示已经收到上游回调处理
 	if order.Status > 1 {
-		return fmt.Errorf("upstream callback merchant order  have handled with MOrderID %v,order status is: %v", upOrder.OrderID, order.Status)
+		return fmt.Errorf("upstream callback merchant order,  have handled with MOrderID %v,order status is: %v", upOrder.OrderID, order.Status)
 	}
 	// 判断一下交易金额是否正确
 	if msg.Amount.Cmp(order.Amount) != 0 {
@@ -193,6 +193,7 @@ func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 	}
 
 	var mainDao *dao.MainDao
+	mainDao = dao.NewMainDao()
 	merchant, err := mainDao.GetMerchantId(upOrder.MerchantID)
 	if err != nil || merchant == nil || merchant.Status != 1 {
 		return fmt.Errorf("merchant not found or inactive: %v", err)
@@ -200,7 +201,7 @@ func receiveProcessOrderNotification(msg ReceiveHyperfOrderMessage) error {
 
 	// 如果订单成功就结算商户与代理分润
 	if receiveConvertStatus(msg.Status) == "SUCCESS" {
-		var settleService = &service.SettlementService{}
+		var settleService = service.NewSettlementService()
 		var settlementResult dto.SettlementResult
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
 		err := settleService.Settlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)

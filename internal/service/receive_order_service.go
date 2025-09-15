@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
 
 	"github.com/shopspring/decimal"
@@ -78,6 +79,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 2) 获取商户信息（带缓存和防击穿）
 	merchant, err := s.getMerchantWithCache(req.MerchantNo)
 	if err != nil || merchant == nil {
+		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("merchant invalid: %s", err))
 		return resp, fmt.Errorf("merchant invalid: %w", err)
 	}
 
@@ -90,12 +92,14 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 4) 获取系统通道信息
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
+		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType))
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 
 	// 5) 获取商户通道信息
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
+		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType))
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 
@@ -105,23 +109,27 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		// 单独通道模式
 		payChannelProduct, err = s.SelectSingleChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency)
 		if err != nil {
+			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("no channels available"))
 			return resp, errors.New("no channels available")
 		}
 
 		// 费率检查
 		if payChannelProduct.MDefaultRate.LessThanOrEqual(payChannelProduct.CostRate) {
+			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel setting rate is incorrect"))
 			return resp, errors.New("the channel setting rate is incorrect")
 		}
 
 		// 金额范围检查
 		orderRange := fmt.Sprintf("%v-%v", payChannelProduct.MinAmount, payChannelProduct.MaxAmount)
 		if !utils.MatchOrderRange(amount, orderRange) {
+			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the order amount is subject to risk control"))
 			return resp, errors.New("the order amount is subject to risk control")
 		}
 	} else {
 		// 轮询模式
 		payChannelProduct, err = s.selectPollingChannelWithRetry(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, amount)
 		if err != nil {
+			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("no channels available: %s", err))
 			return resp, fmt.Errorf("no channels available: %w", err)
 		}
 	}
@@ -316,7 +324,6 @@ func (s *ReceiveOrderService) selectPollingChannelWithRetry(mId uint, sysChannel
 
 		return product, nil
 	}
-
 	return dto.PayProductVo{}, errors.New("no suitable channel found after filtering")
 }
 

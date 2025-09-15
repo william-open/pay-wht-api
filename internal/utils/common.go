@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"log"
@@ -210,4 +211,18 @@ func checkNilRecursive(val reflect.Value, path string) error {
 		}
 	}
 	return nil
+}
+
+// 错误信息映射函数（可扩展）
+func ValidationMsg(fe validator.FieldError) string {
+	switch fe.Tag() {
+	case "required":
+		return "字段不能为空"
+	case "url":
+		return "必须是合法的 URL 地址"
+	case "email":
+		return "必须是合法的邮箱格式"
+	default:
+		return "参数格式错误"
+	}
 }
