@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"wht-order-api/internal/channel/health"
@@ -116,7 +117,8 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	}
 
 	// 3) 金额转换
-	amount, err := decimal.NewFromString(req.Amount)
+	log.Printf("传入代付金额: %v", req.Amount)
+	amount, err := decimal.NewFromString(strings.TrimSpace(req.Amount))
 	if err != nil {
 		log.Printf("金额格式错误: %s", req.Amount)
 		return resp, errors.New("amount format error")
