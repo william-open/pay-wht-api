@@ -14,6 +14,7 @@ import (
 	"time"
 	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
 
 	"github.com/shopspring/decimal"
 	"golang.org/x/sync/singleflight"
@@ -79,7 +80,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 2) 获取商户信息（带缓存和防击穿）
 	merchant, err := s.getMerchantWithCache(req.MerchantNo)
 	if err != nil || merchant == nil {
-		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("merchant invalid: %s", err))
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("merchant invalid: %s", err), true)
 		return resp, fmt.Errorf("merchant invalid: %w", err)
 	}
 
@@ -92,14 +93,14 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 4) 获取系统通道信息
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
-		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType))
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType), true)
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 
 	// 5) 获取商户通道信息
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
-		notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType))
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the channel does not exist or is invalid,channel:%v", req.PayType), true)
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 
@@ -109,28 +110,29 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		// 单独通道模式
 		payChannelProduct, err = s.SelectSingleChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency)
 		if err != nil {
-			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("no channels available"))
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("商户号: %s ,no channels available,channel: %s", req.MerchantNo, req.PayType), true)
 			return resp, errors.New("no channels available")
 		}
 
 		// 费率检查
 		if payChannelProduct.MDefaultRate.LessThanOrEqual(payChannelProduct.CostRate) {
-			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the channel setting rate is incorrect"))
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("商户号: %s ,the channel setting rate is incorrect", req.MerchantNo), true)
 			return resp, errors.New("the channel setting rate is incorrect")
 		}
 
 		// 金额范围检查
 		orderRange := fmt.Sprintf("%v-%v", payChannelProduct.MinAmount, payChannelProduct.MaxAmount)
 		if !utils.MatchOrderRange(amount, orderRange) {
-			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("the order amount is subject to risk control"))
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the order amount is subject to risk control"), true)
 			return resp, errors.New("the order amount is subject to risk control")
 		}
 	} else {
 		// 轮询模式
 		payChannelProduct, err = s.selectPollingChannelWithRetry(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, amount)
 		if err != nil {
-			notify.NotifySendMsgToTG(merchant.TelegramGroupChatId, fmt.Sprintf("no channels available: %s", err))
-			return resp, fmt.Errorf("no channels available: %w", err)
+			msg := fmt.Errorf("[%s],no channels available: %w", req.MerchantNo, err)
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("商户号: %s ,no channels available: %v", req.MerchantNo, err), true)
+			return resp, msg
 		}
 	}
 
@@ -172,6 +174,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 				log.Printf("update channel success rate failed: %v", e)
 			}
 		}()
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("调用上游失败:%s", err), true)
 		resp = dto.CreateOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
 			TranFlow:    req.TranFlow,
@@ -195,7 +198,27 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 
 	// 12) 异步处理缓存和事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
-
+	// 13) 异步处理统计数据
+	go func() {
+		country, cErr := s.mainDao.GetCountry(order.Currency)
+		if cErr != nil {
+			log.Printf("获取国家信息异常: %v", cErr)
+		}
+		(&StatsService{}).OnOrderCreated(&dto.OrderMessageMQ{
+			OrderID:    strconv.FormatUint(order.OrderID, 10),
+			MerchantID: order.MID,
+			CountryID:  country.ID,
+			ChannelID:  order.ChannelID,
+			SupplierID: order.SupplierID,
+			Amount:     order.Amount,
+			Profit:     *order.Profit,
+			Cost:       *order.Cost,
+			Status:     2,
+			OrderType:  "collect",
+			Currency:   order.Currency,
+			CreateTime: time.Now(),
+		})
+	}()
 	log.Printf("代收下单成功，返回数据:%+v", resp)
 	return resp, nil
 }
@@ -324,7 +347,7 @@ func (s *ReceiveOrderService) selectPollingChannelWithRetry(mId uint, sysChannel
 
 		return product, nil
 	}
-	return dto.PayProductVo{}, errors.New("no suitable channel found after filtering")
+	return dto.PayProductVo{}, errors.New("polling channel,no suitable channel found after filtering")
 }
 
 // getHealthManager 获取通道健康管理器
@@ -463,6 +486,9 @@ func (s *ReceiveOrderService) createOrder(
 	}
 
 	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
+	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100))      //上游成本费用
+	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
+	profitFee := orderFee.Sub(costFee)
 	m := &ordermodel.MerchantOrder{
 		OrderID:        oid,
 		MID:            merchant.MerchantID,
@@ -489,6 +515,8 @@ func (s *ReceiveOrderService) createOrder(
 		UpFixedFee:     &payChannelProduct.CostFee,
 		Fees:           settle.MerchantTotalFee,
 		Country:        &payChannelProduct.Country,
+		Cost:           &costFee,
+		Profit:         &profitFee,
 		SettleSnapshot: ordermodel.SettleSnapshot(orderSettle),
 		CreateTime:     &now,
 	}

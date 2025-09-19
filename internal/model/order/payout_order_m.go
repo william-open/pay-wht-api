@@ -83,5 +83,7 @@ type MerchantPayOutOrderM struct {
 	Country        *string              `gorm:"column:country;type:varchar(30)" json:"country"`                       // 国家
 	UpFixedFee     *decimal.Decimal     `gorm:"column:up_fixed_fee;type:decimal(10,2)" json:"upFixedRate"`            // 上游通道固定费用
 	MFixedFee      *decimal.Decimal     `gorm:"column:m_fixed_fee;type:decimal(10,2)" json:"MFixedFee"`               // 商户通道固定费用
+	Cost           *decimal.Decimal     `gorm:"column:cost;type:decimal(10,2)" json:"cost"`                           // 成本费用
+	Profit         *decimal.Decimal     `gorm:"column:profit;type:decimal(10,2)" json:"profit"`                       // 利润费用
 	SettleSnapshot PayoutSettleSnapshot `gorm:"column:settle_snapshot;type:json" json:"settleSnapshot"`               // 订单结算快照
 }

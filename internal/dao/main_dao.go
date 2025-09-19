@@ -582,3 +582,16 @@ func (d *MainDao) GetSinglePayChannel(mId uint, sysChannelCode string, channelTy
 
 	return products, err
 }
+
+// GetCountry 获取国家信息
+func (d *MainDao) GetCountry(currency string) (dto.CurrencyCodeResponse, error) {
+	if err := d.checkDB(); err != nil {
+		return dto.CurrencyCodeResponse{}, fmt.Errorf("get country  failed: %w", err)
+	}
+
+	var ch dto.CurrencyCodeResponse
+	if err := d.DB.Table("w_currency_code").Where("code=?", currency).First(&ch).Error; err != nil {
+		return dto.CurrencyCodeResponse{}, fmt.Errorf("query failed: %w", err)
+	}
+	return ch, nil
+}

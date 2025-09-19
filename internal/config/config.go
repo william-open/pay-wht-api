@@ -22,9 +22,36 @@ type MysqlCfg struct {
 	MaxIdleConns int    `mapstructure:"maxIdleConns"`
 	MaxOpenConns int    `mapstructure:"maxOpenConns"`
 }
-type RabbitCfg struct {
-	URL string `mapstructure:"url"`
+type RabbitProducerCfg struct {
+	Name         string `mapstructure:"name"`
+	Exchange     string `mapstructure:"exchange"`
+	ExchangeType string `mapstructure:"exchange_type"`
+	RoutingKey   string `mapstructure:"routing_key"`
 }
+
+type RabbitConsumerCfg struct {
+	Name         string `mapstructure:"name"`
+	Queue        string `mapstructure:"queue"`
+	Exchange     string `mapstructure:"exchange"`
+	ExchangeType string `mapstructure:"exchange_type"`
+	RoutingKey   string `mapstructure:"routing_key"`
+	Durable      bool   `mapstructure:"durable"`
+	AutoDelete   bool   `mapstructure:"auto_delete"`
+	Exclusive    bool   `mapstructure:"exclusive"`
+	NoWait       bool   `mapstructure:"no_wait"`
+}
+
+type RabbitCfg struct {
+	Host          string              `mapstructure:"host"`
+	Port          int                 `mapstructure:"port"`
+	Username      string              `mapstructure:"username"`
+	Password      string              `mapstructure:"password"`
+	VirtualHost   string              `mapstructure:"virtual_host"`
+	PrefetchCount int                 `mapstructure:"prefetch_count"`
+	Producers     []RabbitProducerCfg `mapstructure:"producers"`
+	Consumers     []RabbitConsumerCfg `mapstructure:"consumers"`
+}
+
 type RedisCfg struct {
 	Addr     string `mapstructure:"addr"`
 	Password string `mapstructure:"password"`
@@ -43,15 +70,22 @@ type UpstreamCfg struct {
 	PayoutApiUrl  string `mapstructure:"payoutApiUrl"`
 }
 
+type ProjectCfg struct {
+	Name      string `mapstructure:"name"`
+	Version   string `mapstructure:"version"`
+	Copyright string `mapstructure:"copyright"`
+}
+
 type Root struct {
 	Server     ServerCfg   `mapstructure:"server"`
 	MysqlMain  MysqlCfg    `mapstructure:"mysql_main"`
 	MysqlOrder MysqlCfg    `mapstructure:"mysql_order"`
-	RabbitMQ   RabbitCfg   `mapstructure:"rabbitmq"`
+	RabbitMQ   RabbitCfg   `mapstructure:"rabbitmq"` // ✅ 替换原来的简化版
 	Redis      RedisCfg    `mapstructure:"redis"`
 	Security   SecurityCfg `mapstructure:"security"`
 	Order      OrderCfg    `mapstructure:"order"`
 	Upstream   UpstreamCfg `mapstructure:"upstream"`
+	Project    ProjectCfg  `mapstructure:"project"`
 }
 
 var C Root

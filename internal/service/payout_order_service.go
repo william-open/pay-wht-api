@@ -17,7 +17,9 @@ import (
 	"time"
 	"wht-order-api/internal/channel/health"
 	mainmodel "wht-order-api/internal/model/main"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 
 	"wht-order-api/internal/dal"
@@ -94,6 +96,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 
 	// 服务健康检查
 	if !s.IsHealthy() {
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("service temporarily unavailable, please try again later:%v", req.PayType), true)
 		return resp, errors.New("service temporarily unavailable, please try again later")
 	}
 
@@ -109,10 +112,12 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	merchant, err := s.getMerchantWithCache(req.MerchantNo)
 	if err != nil {
 		log.Printf("获取商户信息失败: %v", err)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("merchant invalid:%v", req.MerchantNo), true)
 		return resp, fmt.Errorf("merchant invalid: %w", err)
 	}
 	if merchant == nil {
 		log.Printf("商户不存在: %s", req.MerchantNo)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("merchant not found:%v", req.MerchantNo), true)
 		return resp, errors.New("merchant not found")
 	}
 
@@ -132,20 +137,24 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
 	if mmErr != nil {
 		log.Printf("查询商户余额失败，商户号:%v", merchant.MerchantID)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("query merchant amount failed:%v", req.MerchantNo), true)
 		return resp, errors.New("query merchant amount failed")
 	}
 	if merchantMoney.Money.LessThan(amount) {
 		log.Printf("商户号: %v,商户余额不错，代付金额: %v,商户余额: %v", merchant.MerchantID, req.Amount, merchantMoney.Money)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("商户号: %v,商户余额不错，代付金额: %v,商户余额: %v", merchant.MerchantID, req.Amount, merchantMoney.Money), true)
 		return resp, errors.New("insufficient balance")
 	}
 	// 5) 获取系统通道信息
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil {
 		log.Printf("获取系统通道失败: %v", err)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the channel does not exist or is invalid, %v", req.PayType), true)
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 	if channelDetail == nil {
 		log.Printf("系统通道不存在: %s", req.PayType)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the channel does not exist or is invalid, %v", req.PayType), true)
 		return resp, errors.New("the channel does not exist or is invalid")
 	}
 
@@ -174,6 +183,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		if payChannelProduct.MDefaultRate.LessThanOrEqual(payChannelProduct.CostRate) {
 			log.Printf("通道费率设置错误: MDefaultRate=%v, CostRate=%v",
 				payChannelProduct.MDefaultRate, payChannelProduct.CostRate)
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("the channel setting rate is incorrect, %v", req.PayType), true)
 			return resp, errors.New("the channel setting rate is incorrect")
 		}
 
@@ -181,6 +191,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		orderRange := fmt.Sprintf("%v-%v", payChannelProduct.MinAmount, payChannelProduct.MaxAmount)
 		if !utils.MatchOrderRange(amount, orderRange) {
 			log.Printf("订单金额不符合风控要求: amount=%v, range=%s", amount, orderRange)
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("订单金额不符合风控要求: amount=%v, range=%s", amount, orderRange), true)
 			return resp, errors.New("the order amount is subject to risk control")
 		}
 	} else {
@@ -188,6 +199,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 		payChannelProduct, err = s.selectPollingChannelWithRetry(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, amount)
 		if err != nil {
 			log.Printf("选择轮询通道失败: %v", err)
+			notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("no channels available: %v", req.MerchantNo), true)
 			return resp, fmt.Errorf("no channels available: %w", err)
 		}
 	}
@@ -234,7 +246,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 				log.Printf("更新通道成功率失败: %v", e)
 			}
 		}()
-
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("[代付]商户: %s, 调用上游失败:%s", req.MerchantNo, err), true)
 		resp = dto.CreatePayoutOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
 			TranFlow:    req.TranFlow,
@@ -259,6 +271,27 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 	// 13) 异步处理缓存和事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 
+	// 14) 异步处理统计数据
+	go func() {
+		country, cErr := s.mainDao.GetCountry(order.Currency)
+		if cErr != nil {
+			log.Printf("获取国家信息异常: %v", cErr)
+		}
+		(&StatsService{}).OnOrderCreated(&dto.OrderMessageMQ{
+			OrderID:    strconv.FormatUint(order.OrderID, 10),
+			MerchantID: order.MID,
+			CountryID:  country.ID,
+			ChannelID:  order.ChannelID,
+			SupplierID: order.SupplierID,
+			Amount:     order.Amount,
+			Profit:     *order.Profit,
+			Cost:       *order.Cost,
+			Status:     2,
+			OrderType:  "payout",
+			Currency:   order.Currency,
+			CreateTime: time.Now(),
+		})
+	}()
 	log.Printf("代付下单成功，返回数据:%+v", resp)
 
 	return resp, nil
@@ -449,6 +482,9 @@ func (s *PayoutOrderService) createOrder(
 	}
 
 	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
+	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100))      //上游成本费用
+	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
+	profitFee := orderFee.Sub(costFee)
 	m := &ordermodel.MerchantPayOutOrderM{
 		OrderID:        oid,
 		MID:            merchant.MerchantID,
@@ -480,6 +516,8 @@ func (s *PayoutOrderService) createOrder(
 		UpFixedFee:     &payChannelProduct.CostFee,
 		Fees:           settle.MerchantTotalFee,
 		Country:        &payChannelProduct.Country,
+		Cost:           &costFee,
+		Profit:         &profitFee,
 		SettleSnapshot: ordermodel.PayoutSettleSnapshot(orderSettle),
 	}
 

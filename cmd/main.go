@@ -5,6 +5,7 @@ import (
 	"log"
 	"wht-order-api/internal/logger"
 	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
 
 	"github.com/gin-gonic/gin"
 
@@ -26,7 +27,11 @@ func main() {
 	dal.InitMainDB()
 	dal.InitOrderDB()
 	dal.InitRedis()
-	dal.InitRabbitMQ()
+	mqErr := dal.InitRabbitMQ()
+	if mqErr != nil {
+		log.Fatalf("启动消息队列失败,错误信息: %v", mqErr)
+		return
+	}
 
 	// idgen
 	// 初始化 ID 生成器
@@ -45,6 +50,9 @@ func main() {
 	if config.C.Server.Mode != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
+
+	// 初始化一些系统配置参数
+	system.Config()
 
 	r := gin.New()
 
