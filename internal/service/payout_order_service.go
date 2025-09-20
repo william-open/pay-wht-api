@@ -270,28 +270,6 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 
 	// 13) 异步处理缓存和事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
-
-	// 14) 异步处理统计数据
-	go func() {
-		country, cErr := s.mainDao.GetCountry(order.Currency)
-		if cErr != nil {
-			log.Printf("获取国家信息异常: %v", cErr)
-		}
-		(&StatsService{}).OnOrderCreated(&dto.OrderMessageMQ{
-			OrderID:    strconv.FormatUint(order.OrderID, 10),
-			MerchantID: order.MID,
-			CountryID:  country.ID,
-			ChannelID:  order.ChannelID,
-			SupplierID: order.SupplierID,
-			Amount:     order.Amount,
-			Profit:     *order.Profit,
-			Cost:       *order.Cost,
-			Status:     2,
-			OrderType:  "payout",
-			Currency:   order.Currency,
-			CreateTime: time.Now(),
-		})
-	}()
 	log.Printf("代付下单成功，返回数据:%+v", resp)
 
 	return resp, nil
@@ -369,6 +347,8 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.PayMethod = req.PayMethod
 	upstreamRequest.AccName = req.AccName
 	upstreamRequest.AccNo = req.AccNo
+	upstreamRequest.BankName = req.BankName
+	upstreamRequest.BankCode = req.BankCode
 	upstreamRequest.UpstreamCode = payChannelProduct.UpstreamCode
 	upstreamRequest.Mode = "payout"
 

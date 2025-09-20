@@ -41,10 +41,12 @@ func main() {
 	// 初始化分片引擎
 	shard.InitShardEngines()
 	logger.InitLogger()
+
 	// start MQ receive consumer
 	go mq.StartReceiveConsumer()
 	// start MQ payout consumer
 	go mq.StartPayoutConsumer()
+	// 2. 初始化全局 Publisher
 
 	// http server
 	if config.C.Server.Mode != "debug" {

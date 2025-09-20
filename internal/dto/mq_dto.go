@@ -14,6 +14,7 @@ type OrderMessageMQ struct {
 	Amount     decimal.Decimal
 	Profit     decimal.Decimal
 	Cost       decimal.Decimal
+	Fee        decimal.Decimal
 	Status     int
 	OrderType  string
 	Currency   string

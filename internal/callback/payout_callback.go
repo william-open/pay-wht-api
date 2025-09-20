@@ -13,17 +13,20 @@ import (
 	"wht-order-api/internal/dal"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/event"
 	orderModel "wht-order-api/internal/model/order"
 	"wht-order-api/internal/settlement"
 	"wht-order-api/internal/shard"
 	"wht-order-api/internal/utils"
 )
 
-type PayoutCallback struct{}
+type PayoutCallback struct {
+	pub event.Publisher
+}
 
-func NewPayoutCallback() *PayoutCallback {
+func NewPayoutCallback(pub event.Publisher) *PayoutCallback {
 
-	return &PayoutCallback{}
+	return &PayoutCallback{pub: pub}
 }
 
 const (
@@ -85,6 +88,32 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		if err != nil {
 			return fmt.Errorf("[CALLBACK-PAYOUT] settlement  failed err: %v", err)
 		}
+
+		// 14) 异步处理统计数据
+		go func() {
+			country, cErr := mainDao.GetCountry(order.Currency)
+			if cErr != nil {
+				log.Printf("获取国家信息异常: %v", cErr)
+			}
+			err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
+				OrderID:    strconv.FormatUint(order.OrderID, 10),
+				MerchantID: order.MID,
+				CountryID:  country.ID,
+				ChannelID:  order.ChannelID,
+				SupplierID: order.SupplierID,
+				Amount:     order.Amount,
+				Profit:     *order.Profit,
+				Cost:       *order.Cost,
+				Fee:        order.Fees,
+				Status:     2,
+				OrderType:  "payout",
+				Currency:   order.Currency,
+				CreateTime: time.Now(),
+			})
+			if err != nil {
+				return
+			}
+		}()
 	}
 
 	// 构建回调通知负载

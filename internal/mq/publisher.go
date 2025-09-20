@@ -8,10 +8,14 @@ import (
 	"log"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dal"
+	"wht-order-api/internal/event"
 )
 
+type Publisher struct {
+}
+
 // Publish 发布消息到指定生产者配置的 exchange/routingKey
-func Publish(name string, payload any) error {
+func (p *Publisher) Publish(name string, payload any) error {
 	ch := dal.GetChannel()
 	if ch == nil {
 		return errors.New("RabbitMQ 通道未初始化")
@@ -66,4 +70,8 @@ func Publish(name string, payload any) error {
 
 	log.Printf("[MQ] ✅ 消息已发布 [%s → %s]: %s", target.Name, target.RoutingKey, string(body))
 	return nil
+}
+
+func NewPublisher() event.Publisher {
+	return &Publisher{}
 }

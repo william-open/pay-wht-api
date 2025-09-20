@@ -23,7 +23,9 @@ func receiveHandleOrderMessage(d amqp.Delivery) {
 	log.Printf("📨 [CALLBACK-RECEIVE] Received order message: MOrderID=%s, Status=%s, Amount=%.2f",
 		msg.MOrderID, msg.Status, msg.Amount)
 
-	if err := callback.NewReceiveCallback().HandleUpstreamCallback(&msg); err != nil {
+	// 创建 Publisher 实例
+	pub := NewPublisher()
+	if err := callback.NewReceiveCallback(pub).HandleUpstreamCallback(&msg); err != nil {
 		log.Printf("❌ [CALLBACK-RECEIVE] Failed to process order notification: %v", err)
 		d.Nack(false, false)
 		return

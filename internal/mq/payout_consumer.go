@@ -25,7 +25,8 @@ func payoutHandleOrderMessage(d amqp.Delivery) {
 
 	log.Printf("📨 [CALLBACK-PAYOUT] 收到代付回调: MOrderID=%s, Status=%s", msg.MOrderID, msg.Status)
 
-	err := callback.NewPayoutCallback().HandleUpstreamCallback(&msg)
+	pub := NewPublisher()
+	err := callback.NewPayoutCallback(pub).HandleUpstreamCallback(&msg)
 	if err != nil {
 		log.Printf("❌ [CALLBACK-PAYOUT] 回调处理失败: %v", err)
 		d.Nack(false, false)

@@ -174,7 +174,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 				log.Printf("update channel success rate failed: %v", e)
 			}
 		}()
-		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("调用上游失败:%s", err), true)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("上游通道:%s,调用上游失败:%s", payChannelProduct.UpChannelTitle, err), true)
 		resp = dto.CreateOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
 			TranFlow:    req.TranFlow,
@@ -198,27 +198,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 
 	// 12) 异步处理缓存和事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
-	// 13) 异步处理统计数据
-	go func() {
-		country, cErr := s.mainDao.GetCountry(order.Currency)
-		if cErr != nil {
-			log.Printf("获取国家信息异常: %v", cErr)
-		}
-		(&StatsService{}).OnOrderCreated(&dto.OrderMessageMQ{
-			OrderID:    strconv.FormatUint(order.OrderID, 10),
-			MerchantID: order.MID,
-			CountryID:  country.ID,
-			ChannelID:  order.ChannelID,
-			SupplierID: order.SupplierID,
-			Amount:     order.Amount,
-			Profit:     *order.Profit,
-			Cost:       *order.Cost,
-			Status:     2,
-			OrderType:  "collect",
-			Currency:   order.Currency,
-			CreateTime: time.Now(),
-		})
-	}()
+
 	log.Printf("代收下单成功，返回数据:%+v", resp)
 	return resp, nil
 }
