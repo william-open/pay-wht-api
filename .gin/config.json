@@ -1,0 +1,6 @@
+{
+  "immediate": true,
+  "port": 8088,
+  "appPort": 8080,
+  "path": "."
+}
