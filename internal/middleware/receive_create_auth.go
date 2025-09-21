@@ -120,6 +120,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		req.ClientId = clientId
 		// 核查商户通道编码是否开启
 		canChannel := verifyService.VerifyChannelValid(merchant.MerchantID, req.PayType)
 		if !canChannel {

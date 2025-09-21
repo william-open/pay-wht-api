@@ -52,6 +52,7 @@ type UpstreamRequest struct {
 	PayMethod    string `json:"payMethod"`                         //支付方式
 	Mode         string `json:"mode"`                              //模式 receive payout
 	UpstreamCode string `json:"upstreamCode"`                      //上游供应商通道编码
+	ClientIp     string `json:"clientIp"`                          //客户端IP地址
 
 }
 

@@ -601,6 +601,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 		UpstreamCode: payChannelProduct.UpstreamCode,
 		NotifyUrl:    req.NotifyUrl,
 		Mode:         "receive",
+		ClientIp:     req.ClientId,
 	}
 
 	// 使用带超时的上下文
