@@ -204,13 +204,13 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 	// 校验返回内容必须包含 ok 或 success
 	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
 	if respStr != "ok" && respStr != "success" {
-		orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 2)
+		orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 2, payload.Status)
 		if orderErr != nil {
 			return fmt.Errorf("[CALLBACK-RECEIVE] notify merchant order update data failed: %s", respStr)
 		}
 		return fmt.Errorf("[CALLBACK-RECEIVE] merchant response invalid: %s", respStr)
 	}
-	orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 1)
+	orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status)
 	if orderErr != nil {
 		return fmt.Errorf("[CALLBACK-RECEIVE] notify merchant order update data failed: %s", orderErr)
 	}
@@ -219,7 +219,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 }
 
 // 更新商户订单信息
-func (s *ReceiveCallback) receiveUpdateMerchantOrder(orderId string, status int8) error {
+func (s *ReceiveCallback) receiveUpdateMerchantOrder(orderId string, notifyStatus int8, orderStatus string) error {
 
 	id, err := strconv.ParseUint(orderId, 10, 64)
 	if err != nil {
@@ -230,15 +230,15 @@ func (s *ReceiveCallback) receiveUpdateMerchantOrder(orderId string, status int8
 	orderTable := shard.OrderShard.GetTable(id, time.Now())
 	// 这里必须有更新字段，例如更新状态、更新时间
 	updateData := map[string]interface{}{
-		"notify_status": status,
+		"notify_status": notifyStatus,
 		"notify_time":   time.Now(),
 		"update_time":   time.Now(),
 	}
-	if status == 1 { //支付成功时标识完成
+	if s.receiveGetUpStatusMessage(orderStatus) == 2 { //支付成功时标识完成
 		updateData["finish_time"] = time.Now()
 		updateData["status"] = 2
 	} else {
-		updateData["status"] = 3
+		updateData["status"] = s.receiveGetUpStatusMessage(orderStatus)
 	}
 
 	// 更新数据库

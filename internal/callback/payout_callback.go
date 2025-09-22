@@ -168,13 +168,13 @@ func (s *PayoutCallback) payoutNotifyMerchant(url string, payload dto.PayoutNoti
 	// 校验返回内容必须包含 ok 或 success
 	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
 	if respStr != "ok" && respStr != "success" {
-		orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 2)
+		orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 2, payload.Status)
 		if orderErr != nil {
 			return fmt.Errorf("[CALLBACK-PAYOUT] notify merchant order update data failed: %s", respStr)
 		}
 		return fmt.Errorf("[CALLBACK-PAYOUT] merchant response invalid: %s", respStr)
 	}
-	orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 1)
+	orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status)
 	if orderErr != nil {
 		return fmt.Errorf("[CALLBACK-PAYOUT] notify merchant order update data failed: %s", orderErr)
 	}
@@ -183,7 +183,7 @@ func (s *PayoutCallback) payoutNotifyMerchant(url string, payload dto.PayoutNoti
 }
 
 // 更新商户订单信息
-func (s *PayoutCallback) payoutUpdateMerchantOrder(orderId string, status int8) error {
+func (s *PayoutCallback) payoutUpdateMerchantOrder(orderId string, notifyStatus int8, orderStatus string) error {
 
 	id, err := strconv.ParseUint(orderId, 10, 64)
 	if err != nil {
@@ -194,15 +194,15 @@ func (s *PayoutCallback) payoutUpdateMerchantOrder(orderId string, status int8) 
 	orderTable := shard.OutOrderShard.GetTable(id, time.Now())
 	// 这里必须有更新字段，例如更新状态、更新时间
 	updateData := map[string]interface{}{
-		"notify_status": status,
+		"notify_status": notifyStatus,
 		"notify_time":   time.Now(),
 		"update_time":   time.Now(),
 	}
-	if status == 1 { //支付成功时标识完成
+	if s.payoutGetUpStatusMessage(orderStatus) == 2 { //支付成功时标识完成
 		updateData["finish_time"] = time.Now()
 		updateData["status"] = 2
 	} else {
-		updateData["status"] = 3
+		updateData["status"] = s.payoutGetUpStatusMessage(orderStatus)
 	}
 
 	// 更新数据库
