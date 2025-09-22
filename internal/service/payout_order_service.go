@@ -246,7 +246,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (dto.CreatePay
 				log.Printf("更新通道成功率失败: %v", e)
 			}
 		}()
-		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("[代付]商户: %s, 调用上游失败:%s", req.MerchantNo, err), true)
+		notify.Notify(system.BotChatID, "warn", "高风险警告", fmt.Sprintf("[代付]商户: %s, 调用上游[%s]失败:%s", req.MerchantNo, payChannelProduct.UpChannelTitle, err), true)
 		resp = dto.CreatePayoutOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
 			TranFlow:    req.TranFlow,
