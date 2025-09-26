@@ -116,7 +116,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 
 				}
 			}()
-			c.JSON(http.StatusUnauthorized, fmt.Sprintf("%s,%v", clientId, utils.Error(constant.CodeIPNotWhitelisted)))
+			c.JSON(http.StatusUnauthorized, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": utils.Error(constant.CodeIPNotWhitelisted)})
 			c.Abort()
 			return
 		}
