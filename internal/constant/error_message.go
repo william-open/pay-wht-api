@@ -9,9 +9,10 @@ type ErrorInfo struct {
 // ErrorMessages 错误信息映射
 var ErrorMessages = map[int]ErrorInfo{
 	// 系统错误
-	CodeSuccess:       {"操作成功", "Success"},
-	CodeSystemError:   {"系统错误", "System error"},
-	CodeDatabaseError: {"数据库错误", "Database error"},
+	CodeSuccess:          {"操作成功", "Success"},
+	CodeSystemError:      {"系统错误", "System error"},
+	CodeDatabaseError:    {"数据库错误", "Database error"},
+	CodeIPNotWhitelisted: {"IP不在白名单内", "Ip not in the whitelist error"},
 
 	// 上游错误
 	CodeUpstreamError: {"上游通道错误", "Upstream channel error"},
