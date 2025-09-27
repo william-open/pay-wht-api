@@ -89,6 +89,9 @@ func main() {
 		v1.POST("/order/payout/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 		// 查询商户账户信息
 		v1.POST("/query/account/balance", middleware.AccountAuth(), account.Query)
+		// 信用卡网关
+		v1.POST("/order/credit_card/create", middleware.PayoutCreateAuth(), payout.PayoutOrderCreate)
+		v1.POST("/order/credit_card/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 	}
 
 	addr := ":" + config.C.Server.Port

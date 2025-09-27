@@ -53,6 +53,8 @@ type UpstreamRequest struct {
 	Mode         string `json:"mode"`                              //模式 receive payout
 	UpstreamCode string `json:"upstreamCode"`                      //上游供应商通道编码
 	ClientIp     string `json:"clientIp"`                          //客户端IP地址
+	SubmitUrl    string `json:"submitUrl"`                         //下单URL
+	QueryUrl     string `json:"queryUrl"`                          //查单RL
 
 }
 
@@ -194,6 +196,10 @@ type PayProductVo struct {
 	// 新增字段：从商户通道表中联查的权重
 	UpstreamWeight int    `gorm:"column:upstream_weight"`
 	InterfaceCode  string `gorm:"column:interface_code"`
+	PayApi         string
+	PayQueryApi    string
+	PayoutApi      string
+	PayoutQueryApi string
 }
 
 // VerifyUpstream 验证上游供应商信息

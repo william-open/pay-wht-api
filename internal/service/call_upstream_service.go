@@ -34,6 +34,9 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 		"mode":        req.Mode,
 		"clientIp":    req.ClientIp,
 		"notifyUrl":   req.NotifyUrl, // 添加通知URL
+		"submitUrl":   req.SubmitUrl, // 下单URL
+		"queryUrl":    req.QueryUrl,  // 查单URL
+
 	}
 
 	upstreamUrl := config.C.Upstream.ReceiveApiUrl
@@ -133,6 +136,8 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (st
 		"identityNum":  req.IdentityNum,
 		"mode":         req.Mode,
 		"notifyUrl":    req.NotifyUrl, // 添加通知URL
+		"submitUrl":    req.SubmitUrl, // 下单URL
+		"queryUrl":     req.QueryUrl,  // 查单URL
 	}
 
 	upstreamUrl := config.C.Upstream.PayoutApiUrl

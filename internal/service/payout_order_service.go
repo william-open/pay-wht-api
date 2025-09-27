@@ -350,6 +350,8 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.BankName = req.BankName
 	upstreamRequest.BankCode = req.BankCode
 	upstreamRequest.UpstreamCode = payChannelProduct.UpstreamCode
+	upstreamRequest.QueryUrl = payChannelProduct.PayoutQueryApi
+	upstreamRequest.SubmitUrl = payChannelProduct.PayoutApi
 	upstreamRequest.Mode = "payout"
 
 	// 使用带超时的上下文

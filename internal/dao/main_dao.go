@@ -516,6 +516,10 @@ func (d *MainDao) GetAvailablePollingPayProducts(mId uint, payType string, curre
 			ui.code AS interface_code,
 			wu.account AS up_account,
    			wu.md5_key AS up_api_key,
+			wu.pay_api,
+			wu.pay_query_api,
+			wu.payout_api,
+			wu.payout_query_api,
 			wcc.country,
 			wpw.title AS sys_channel_title
         `).
