@@ -75,7 +75,7 @@ func SendTelegramMessage(chatID string, content string) error {
 func AsyncNotify(chatID string, content string) {
 	go func() {
 		if err := SendTelegramMessage(chatID, content); err != nil {
-			log.Printf("[Telegram] 消息发送失败: %v", err)
+			log.Printf("[Telegram][%v] 消息发送失败: %v", chatID, err)
 		}
 	}()
 }
@@ -117,7 +117,7 @@ func Notify(chatID string, level string, title string, content string, async boo
 		AsyncNotify(chatID, msg)
 	} else {
 		if err := SendTelegramMessage(chatID, msg); err != nil {
-			log.Printf("[Telegram] 消息发送失败: %v", err)
+			log.Printf("[Telegram][%v] 消息发送失败: %v", chatID, err)
 		}
 	}
 }
