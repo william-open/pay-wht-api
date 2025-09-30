@@ -448,6 +448,7 @@ func (d *MainDao) DetailChannel(mid uint64, channelCode string) (*dto.MerchantCh
 	if err := dal.MainDB.
 		Where("m_id = ?", mid).
 		Where("sys_channel_code = ?", channelCode).
+		Where("status = ?", 1).
 		First(&m).Error; err != nil {
 		return result, err
 	}
