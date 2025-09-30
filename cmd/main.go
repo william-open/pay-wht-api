@@ -1,20 +1,18 @@
 package main
 
 import (
+	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"log"
-	"wht-order-api/internal/logger"
-	"wht-order-api/internal/shard"
-	"wht-order-api/internal/system"
-
-	"github.com/gin-gonic/gin"
-
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dal"
 	"wht-order-api/internal/handler"
 	"wht-order-api/internal/idgen"
+	"wht-order-api/internal/logger"
 	"wht-order-api/internal/middleware"
 	"wht-order-api/internal/mq"
+	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
 )
 
 func main() {
@@ -41,7 +39,8 @@ func main() {
 	// 初始化分片引擎
 	shard.InitShardEngines()
 	logger.InitLogger()
-
+	// 初始化一些系统配置参数
+	system.Config()
 	// start MQ receive consumer
 	go mq.StartReceiveConsumer()
 	// start MQ payout consumer
@@ -52,9 +51,6 @@ func main() {
 	if config.C.Server.Mode != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-
-	// 初始化一些系统配置参数
-	system.Config()
 
 	r := gin.New()
 
@@ -89,9 +85,6 @@ func main() {
 		v1.POST("/order/payout/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 		// 查询商户账户信息
 		v1.POST("/query/account/balance", middleware.AccountAuth(), account.Query)
-		// 信用卡网关
-		v1.POST("/order/credit_card/create", middleware.PayoutCreateAuth(), payout.PayoutOrderCreate)
-		v1.POST("/order/credit_card/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 	}
 
 	addr := ":" + config.C.Server.Port

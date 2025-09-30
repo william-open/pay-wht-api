@@ -9,6 +9,8 @@ import (
 	"strings"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/notify"
+	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 )
 
@@ -154,6 +156,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (st
 	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamUrl, params)
 	if err != nil {
 		log.Printf("[Upstream-Payout] 请求失败: %v", err)
+		notify.Notify(system.BotChatID, "warn", "代付下单失败", fmt.Sprintf("[代付]上游商户: %s, 调用上游编码[%s]失败:%s,请求参数:%s", req.MchNo, req.UpstreamCode, err, utils.MapToJSON(req)), true)
 		return "", "", "", fmt.Errorf("请求上游失败: %v", err)
 	}
 	log.Printf("[Upstream-Payout] 响应原始数据: %s", resp)

@@ -516,6 +516,7 @@ func (d *MainDao) GetAvailablePollingPayProducts(mId uint, payType string, curre
 			ui.code AS interface_code,
 			wu.account AS up_account,
    			wu.md5_key AS up_api_key,
+			wu.title AS upstream_title,
 			wu.pay_api,
 			wu.pay_query_api,
 			wu.payout_api,
@@ -543,6 +544,51 @@ func (d *MainDao) GetAvailablePollingPayProducts(mId uint, payType string, curre
 	return products, err
 }
 
+// GetTestSinglePayChannel 查询单独支付通道[管理后台测试通道]
+func (d *MainDao) GetTestSinglePayChannel(mId uint, sysChannelCode string, channelType int8, currency string, payProductId uint64) (dto.PayProductVo, error) {
+	if err := d.checkDB(); err != nil {
+		return dto.PayProductVo{}, fmt.Errorf("GetSinglePayChannel failed : %w", err)
+	}
+	var products dto.PayProductVo
+
+	err := dal.MainDB.
+		Table("w_pay_product AS p").
+		Select(`
+            p.id,p.title AS up_channel_title,
+			p.currency,p.type,p.upstream_id,p.upstream_code,
+			p.interface_id,p.sys_channel_id,p.sys_channel_code,p.status,
+			p.cost_rate,p.cost_fee,p.min_amount,p.max_amount,p.fixed_amount,
+			p.success_rate,
+            u.weight AS upstream_weight,
+			mc.default_rate AS m_default_rate,
+			mc.single_fee AS m_single_fee,
+			ui.code AS interface_code,
+			wu.account AS up_account,
+			wu.title AS upstream_title,
+   			wu.md5_key AS up_api_key,
+			wcc.country,
+			wpw.title AS sys_channel_title
+        `).
+		Joins(`
+            INNER JOIN w_merchant_channel_upstream AS u 
+            ON p.id = u.up_channel_id
+        `).
+		Joins(`LEFT JOIN w_upstream_interface AS ui ON p.interface_id = ui.id`).
+		Joins(`LEFT JOIN w_merchant_channel AS mc ON p.sys_channel_id = mc.sys_channel_id and mc.m_id = ?`, mId).
+		Joins(`LEFT JOIN w_upstream AS wu ON p.upstream_id = wu.id`).
+		Joins(`LEFT JOIN w_currency_code AS wcc ON p.currency = wcc.code`).
+		Joins(`LEFT JOIN w_pay_way AS wpw ON p.sys_channel_id = wpw.id`).
+		Where("p.status = ?", 1).
+		Where("p.currency = ?", currency).
+		Where("p.sys_channel_code = ?", sysChannelCode).
+		Where("p.id = ?", payProductId).
+		Where("u.m_id = ? AND u.currency = ? AND u.sys_channel_code = ? AND u.status = 1", mId, currency, sysChannelCode).
+		Order("u.weight DESC").
+		Find(&products).Error
+
+	return products, err
+}
+
 // GetSinglePayChannel 查询单独支付通道
 func (d *MainDao) GetSinglePayChannel(mId uint, sysChannelCode string, channelType int8, currency string) (dto.PayProductVo, error) {
 	if err := d.checkDB(); err != nil {
@@ -563,6 +609,7 @@ func (d *MainDao) GetSinglePayChannel(mId uint, sysChannelCode string, channelTy
 			mc.single_fee AS m_single_fee,
 			ui.code AS interface_code,
 			wu.account AS up_account,
+			wu.title AS upstream_title,
    			wu.md5_key AS up_api_key,
 			wcc.country,
 			wpw.title AS sys_channel_title

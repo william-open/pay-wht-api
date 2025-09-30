@@ -27,7 +27,7 @@ func (s *ConfigSystem) GetConfigCacheByConfigKey(configKey string) dto.ConfigDet
 	var config dto.ConfigDetailResponse
 
 	// 缓存不为空不从数据库读取，减少数据库压力
-	if configCache, _ := dal.RedisClient.HGet(context.Background(), rediskey.SysConfigKey, configKey).Result(); configCache != "" {
+	if configCache, _ := dal.RedisClient.HGet(context.Background(), rediskey.SysConfigKey(), configKey).Result(); configCache != "" {
 		if err := json.Unmarshal([]byte(configCache), &config); err == nil {
 			return config
 		}
@@ -37,7 +37,7 @@ func (s *ConfigSystem) GetConfigCacheByConfigKey(configKey string) dto.ConfigDet
 	config = s.GetConfigByConfigKey(configKey)
 	if config.ConfigId > 0 {
 		configBytes, _ := json.Marshal(&config)
-		dal.RedisClient.HSet(context.Background(), rediskey.SysConfigKey, configKey, string(configBytes)).Result()
+		dal.RedisClient.HSet(context.Background(), rediskey.SysConfigKey(), configKey, string(configBytes)).Result()
 	}
 
 	return config

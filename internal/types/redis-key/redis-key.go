@@ -2,11 +2,12 @@ package rediskey
 
 import "wht-order-api/internal/config"
 
-var (
+// 获取配置表 Redis Key
+func SysConfigKey() string {
+	return config.C.Project.Name + ":system:config"
+}
 
-	// 配置表数据 redis key
-	SysConfigKey = config.C.Project.Name + ":system:config"
-
-	// 字典表数据 redis key
-	SysDictKey = config.C.Project.Name + ":system:dict:data"
-)
+// 获取字典表 Redis Key
+func SysDictKey() string {
+	return config.C.Project.Name + ":system:dict:data"
+}

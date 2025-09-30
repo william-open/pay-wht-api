@@ -174,6 +174,7 @@ type PayProductVo struct {
 	Type            int8
 	UpstreamId      int64
 	UpstreamCode    string
+	UpstreamTitle   string
 	UpChannelTitle  string
 	InterfaceID     int
 	SysChannelID    int64

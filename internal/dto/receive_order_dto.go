@@ -20,6 +20,7 @@ type CreateOrderReq struct {
 	BankCode     string `json:"bank_code"`                          //付款人银行名
 	BankName     string `json:"bank_name"`                          //付款人银行名
 	ClientId     string `json:"client_id"`                          //客户端IP
+	PayProductId string `json:"pay_product_id"`                     //上游支付产品ID【管理后台测试上游通道用】
 	Sign         string `json:"sign" binding:"required"`            //MD5 签名 32大写
 }
 

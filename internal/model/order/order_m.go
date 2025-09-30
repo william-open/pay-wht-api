@@ -43,6 +43,7 @@ func (s SettleSnapshot) Value() (driver.Value, error) {
 type MerchantOrder struct {
 	OrderID        uint64           `gorm:"column:order_id;primaryKey" json:"orderId"`                            // 全局唯一订单ID
 	MID            uint64           `gorm:"column:m_id;not null;index:idx_merchant_time" json:"mId"`              // 商户ID
+	AID            uint64           `gorm:"column:a_id;not null" json:"aId"`                                      // 代理ID
 	SupplierID     int64            `gorm:"column:supplier_id;not null" json:"supplierId"`                        // 上游供应商ID
 	MOrderID       string           `gorm:"column:m_order_id;type:varchar(50);not null" json:"mOrderId"`          // 商户订单号
 	Amount         decimal.Decimal  `gorm:"column:amount;type:decimal(18,4);not null" json:"amount"`              // 订单金额
