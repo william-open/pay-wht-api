@@ -28,12 +28,12 @@ func MatchOrderRange(amount decimal.Decimal, orderRange string) bool {
 			if len(bounds) != 2 {
 				continue
 			}
-			min, err1 := decimal.NewFromString(bounds[0])
-			max, err2 := decimal.NewFromString(bounds[1])
+			startMin, err1 := decimal.NewFromString(bounds[0])
+			endMax, err2 := decimal.NewFromString(bounds[1])
 			if err1 != nil || err2 != nil {
 				continue
 			}
-			if amount.Cmp(min) >= 0 && amount.Cmp(max) <= 0 {
+			if amount.Cmp(startMin) >= 0 && amount.Cmp(endMax) <= 0 {
 				return true
 			}
 		} else {
