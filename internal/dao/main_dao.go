@@ -577,10 +577,15 @@ func (d *MainDao) GetTestSinglePayChannel(
             wcc.country,
             wpw.title AS sys_channel_title
         `).
+		// ⚡ 把 u.xxx 条件移到 JOIN 里面，并用 LEFT JOIN
 		Joins(`
-            INNER JOIN w_merchant_channel_upstream AS u 
+            LEFT JOIN w_merchant_channel_upstream AS u
             ON p.id = u.up_channel_id
-        `).
+            AND u.m_id = ?
+            AND u.currency = ?
+            AND u.sys_channel_code = ?
+            AND u.status = 1
+        `, mId, currency, sysChannelCode).
 		Joins(`LEFT JOIN w_upstream_interface AS ui ON p.interface_id = ui.id`).
 		Joins(`LEFT JOIN w_merchant_channel AS mc ON p.sys_channel_id = mc.sys_channel_id AND mc.m_id = ?`, mId).
 		Joins(`LEFT JOIN w_upstream AS wu ON p.upstream_id = wu.id`).
@@ -591,7 +596,6 @@ func (d *MainDao) GetTestSinglePayChannel(
 		Where("p.sys_channel_code = ?", sysChannelCode).
 		Where("p.type = ?", channelType).
 		Where("p.id = ?", payProductId).
-		Where("u.m_id = ? AND u.currency = ? AND u.sys_channel_code = ? AND u.status = 1", mId, currency, sysChannelCode).
 		Order("u.weight DESC")
 
 	// 只取一条
@@ -636,10 +640,15 @@ func (d *MainDao) GetSinglePayChannel(
             wcc.country,
             wpw.title AS sys_channel_title
         `).
+		// ⚡ 这里改成 LEFT JOIN，并把 u.xxx 条件挪到 ON 里
 		Joins(`
-            INNER JOIN w_merchant_channel_upstream AS u 
+            LEFT JOIN w_merchant_channel_upstream AS u
             ON p.id = u.up_channel_id
-        `).
+            AND u.m_id = ?
+            AND u.currency = ?
+            AND u.sys_channel_code = ?
+            AND u.status = 1
+        `, mId, currency, sysChannelCode).
 		Joins(`LEFT JOIN w_upstream_interface AS ui ON p.interface_id = ui.id`).
 		Joins(`LEFT JOIN w_merchant_channel AS mc ON p.sys_channel_id = mc.sys_channel_id AND mc.m_id = ?`, mId).
 		Joins(`LEFT JOIN w_upstream AS wu ON p.upstream_id = wu.id`).
@@ -649,10 +658,9 @@ func (d *MainDao) GetSinglePayChannel(
 		Where("p.currency = ?", currency).
 		Where("p.sys_channel_code = ?", sysChannelCode).
 		Where("p.type = ?", channelType).
-		Where("u.m_id = ? AND u.currency = ? AND u.sys_channel_code = ? AND u.status = 1", mId, currency, sysChannelCode).
 		Order("u.weight DESC")
 
-	// 只取一条记录
+	// 只取一条
 	if err := query.Take(&product).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return dto.PayProductVo{}, nil // 没找到，返回空对象
