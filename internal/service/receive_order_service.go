@@ -145,7 +145,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 			fmt.Println("转换失败:", err)
 			return resp, errors.New("test admin no single channel available,pay_product_id transfer error")
 		}
-		single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, payProductId)
+		single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, payProductId)
 		if err != nil {
 			return resp, errors.New("admin test no single channel available")
 		}

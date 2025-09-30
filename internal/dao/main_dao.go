@@ -589,6 +589,7 @@ func (d *MainDao) GetTestSinglePayChannel(
 		Where("p.status = ?", 1).
 		Where("p.currency = ?", currency).
 		Where("p.sys_channel_code = ?", sysChannelCode).
+		Where("p.type = ?", channelType).
 		Where("p.id = ?", payProductId).
 		Where("u.m_id = ? AND u.currency = ? AND u.sys_channel_code = ? AND u.status = 1", mId, currency, sysChannelCode).
 		Order("u.weight DESC")
