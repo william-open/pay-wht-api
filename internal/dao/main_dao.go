@@ -457,7 +457,7 @@ func (d *MainDao) DetailChannel(mid uint64, channelCode string) (*dto.MerchantCh
 	if m.Status < 1 {
 		return result, errors.New("通道未开启")
 	}
-	if m.DefaultRate.Cmp(decimal.Zero) <= 0 {
+	if m.DefaultRate.Cmp(decimal.Zero) <= 0 && m.Type == 1 {
 		return result, errors.New("通道未设置有效费率")
 	}
 
