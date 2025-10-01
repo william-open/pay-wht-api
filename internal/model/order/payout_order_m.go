@@ -87,4 +87,5 @@ type MerchantPayOutOrderM struct {
 	Cost           *decimal.Decimal     `gorm:"column:cost;type:decimal(10,2)" json:"cost"`                           // 成本费用
 	Profit         *decimal.Decimal     `gorm:"column:profit;type:decimal(10,2)" json:"profit"`                       // 利润费用
 	SettleSnapshot PayoutSettleSnapshot `gorm:"column:settle_snapshot;type:json" json:"settleSnapshot"`               // 订单结算快照
+	NotifyStatus   *int8                `gorm:"column:notify_status;type:tinyint(1)" json:"notifyStatus"`             // 回调通知状态
 }
