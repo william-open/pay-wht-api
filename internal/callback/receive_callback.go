@@ -94,7 +94,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 		var settleService = settlement.NewSettlement()
 		var settlementResult dto.SettlementResult
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
-		err := settleService.DoSettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
+		err := settleService.DoPaySettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
 		if err != nil {
 			return fmt.Errorf("[CALLBACK-RECEIVE] settlement  failed err: %v", err)
 		}

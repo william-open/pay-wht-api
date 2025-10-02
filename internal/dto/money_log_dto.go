@@ -5,6 +5,7 @@ import "github.com/shopspring/decimal"
 type MoneyLog struct {
 	ID          uint64          `json:"id"`          // 主键
 	UID         uint64          `json:"uid"`         // 用户ID
+	AId         uint64          `json:"aId"`         // 代理ID
 	Money       decimal.Decimal `json:"money"`       // 金额
 	OrderNo     string          `json:"order_no"`    // 订单编码
 	Type        int8            `json:"type"`        // 收益类型

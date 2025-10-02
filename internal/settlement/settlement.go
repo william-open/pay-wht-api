@@ -1,7 +1,8 @@
 package settlement
 
 import (
-	"errors"
+	"fmt"
+	"github.com/shopspring/decimal"
 	"log"
 	"strconv"
 	"wht-order-api/internal/dao"
@@ -20,43 +21,107 @@ func NewSettlement() *Settlement {
 	}
 }
 
-// DoSettlement 处理代收订单结算逻辑
-func (s *Settlement) DoSettlement(req dto.SettlementResult, mId string, orderId uint64) error {
+// DoPaySettlement 处理代收订单结算逻辑
+func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, orderId uint64) error {
+	orderNo := strconv.FormatUint(orderId, 10)
 
-	log.Printf("[SETTLEMENT] 结算数据: %+v,商户: %v,订单号: %v", req, mId, orderId)
-	// 1) 主库校验
+	log.Printf("[SETTLEMENT] 开始结算: 商户=%v, 订单号=%v, 数据=%+v", mId, orderNo, req)
+
+	// 1) 校验商户合法性
 	merchant, err := s.mainDao.GetMerchantId(mId)
-	if err != nil || merchant == nil || merchant.Status != 1 {
-		return errors.New("[SETTLEMENT] merchant invalid")
-	}
-
-	// 创建商户资金日志
-	var moneyLog dto.MoneyLog
-	moneyLog.Money = req.MerchantRecv
-	moneyLog.UID = merchant.MerchantID
-	moneyLog.OrderNo = strconv.FormatUint(orderId, 10)
-	moneyLog.Type = 1
-	moneyLog.Operator = merchant.NickName
-	moneyLog.Description = "商户代收"
-	moneyLog.Currency = req.Currency
-
-	err = s.mainDao.CreateMoneyLog(moneyLog)
 	if err != nil {
-		return errors.New("[SETTLEMENT] create money log  invalid")
+		return fmt.Errorf("[SETTLEMENT] 获取商户失败: %w", err)
 	}
-	// 更新代理收益
-	var agentMoney dto.AgentMoney
-	agentMoney.OrderMoney = req.OrderAmount
-	agentMoney.Money = req.AgentIncome
-	agentMoney.MID = merchant.MerchantID
-	agentMoney.AID = merchant.PId
-	agentMoney.OrderNo = strconv.FormatUint(orderId, 10)
-	agentMoney.Currency = req.Currency
-	agentMoney.Remark = "商户代收收益"
+	if merchant == nil || merchant.Status != 1 {
+		return fmt.Errorf("[SETTLEMENT] 商户无效, merchantID=%v", mId)
+	}
 
-	err = s.mainDao.CreateAgentMoneyLog(agentMoney)
-	if err != nil {
-		return errors.New("[SETTLEMENT] create agent money  invalid")
+	// 2) 商户资金日志 & 账户更新
+	moneyLog := dto.MoneyLog{
+		UID:         merchant.MerchantID,
+		Money:       req.MerchantRecv,
+		OrderNo:     orderNo,
+		Type:        dto.MoneyLogTypeDeposit, // ✅ 常量定义
+		Operator:    merchant.NickName,
+		Description: "商户代收",
+		Currency:    req.Currency,
 	}
+
+	if err := s.mainDao.CreateMoneyLog(moneyLog); err != nil {
+		return fmt.Errorf("[SETTLEMENT] 商户资金结算失败, merchantID=%v, orderNo=%v, err=%w", merchant.MerchantID, orderNo, err)
+	}
+
+	// 3) 代理收益 & 账户更新
+	agentMoney := dto.AgentMoney{
+		AID:        merchant.PId,
+		MID:        merchant.MerchantID,
+		OrderNo:    orderNo,
+		OrderMoney: req.OrderAmount,
+		Money:      req.AgentIncome,
+		Currency:   req.Currency,
+		Type:       dto.MoneyLogTypeDeposit, // ✅ 常量定义
+		Remark:     "商户代收收益",
+	}
+
+	if err := s.mainDao.CreateAgentMoneyLog(agentMoney, dto.MoneyLogTypeDepositComm, "代理代收佣金"); err != nil {
+		return fmt.Errorf("[SETTLEMENT] 代理资金结算失败, agentID=%v, orderNo=%v, err=%w", merchant.PId, orderNo, err)
+	}
+
+	log.Printf("[SETTLEMENT] 结算完成: 商户=%v, 代理=%v, 订单号=%v", merchant.MerchantID, merchant.PId, orderNo)
+	return nil
+}
+
+// DoPayoutSettlement 处理代付订单结算逻辑
+// status = true 表示代付成功，false 表示代付失败
+func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, status bool) error {
+	orderNo := strconv.FormatUint(orderId, 10)
+
+	log.Printf("[SETTLEMENT] 开始代付结算: 商户=%v, 订单号=%v, 金额=%v %s, 状态=%v, 数据=%+v",
+		mId, orderNo, req.MerchantRecv, req.Currency, status, req)
+
+	// 1) 校验商户合法性
+	merchant, err := s.mainDao.GetMerchantId(mId)
+	if err != nil {
+		return fmt.Errorf("[SETTLEMENT] 获取商户失败: merchantID=%v, err=%w", mId, err)
+	}
+	if merchant == nil || merchant.Status != 1 {
+		return fmt.Errorf("[SETTLEMENT] 商户无效, merchantID=%v", mId)
+	}
+
+	// 2) 商户资金日志 & 账户更新
+	if err := s.mainDao.HandlePayoutCallback(
+		merchant.MerchantID,
+		req.Currency,
+		orderNo,
+		req.MerchantRecv,
+		status,
+	); err != nil {
+		return fmt.Errorf("[SETTLEMENT] 商户资金结算失败, merchantID=%v, orderNo=%v, 金额=%v, err=%w",
+			merchant.MerchantID, orderNo, req.MerchantRecv, err)
+	}
+
+	// 3) 成功时才处理代理收益
+	if status && req.AgentIncome.GreaterThan(decimal.Zero) {
+		agentMoney := dto.AgentMoney{
+			AID:        merchant.PId,
+			MID:        merchant.MerchantID,
+			OrderNo:    orderNo,
+			OrderMoney: req.OrderAmount,
+			Money:      req.AgentIncome,
+			Currency:   req.Currency,
+			Remark:     "商户代付收益",
+		}
+
+		if err := s.mainDao.CreateAgentMoneyLog(agentMoney, dto.MoneyLogTypePayoutComm, "代理代付佣金"); err != nil {
+			return fmt.Errorf("[SETTLEMENT] 代理资金结算失败, agentID=%v, orderNo=%v, 金额=%v, err=%w",
+				merchant.PId, orderNo, req.AgentIncome, err)
+		}
+	}
+
+	log.Printf("[SETTLEMENT] 代付结算完成: 商户=%v(金额=%v %s), 代理=%v(收益=%v %s), 订单号=%v, 状态=%v",
+		merchant.MerchantID, req.MerchantRecv, req.Currency,
+		merchant.PId, req.AgentIncome, req.Currency,
+		orderNo, status)
+
 	return nil
 }

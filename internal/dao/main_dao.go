@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"log"
 	"time"
 	"wht-order-api/internal/dal"
@@ -183,6 +184,192 @@ func (d *MainDao) GetMerchantAccount(mId string) (dto.MerchantMoney, error) {
 	return ch, nil
 }
 
+// FreezePayout 创建代付订单时冻结资金并写冻结日志
+func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount decimal.Decimal) error {
+	if err := d.checkDB(); err != nil {
+		return fmt.Errorf("freeze payout failed: %w", err)
+	}
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("invalid freeze amount: %s", amount.String())
+	}
+
+	return d.DB.Transaction(func(tx *gorm.DB) error {
+		// 获取并锁定商户账户（避免并发超额冻结）
+		var account mainmodel.MerchantMoney
+		if err := tx.Table("w_merchant_money").
+			Where("uid = ? AND currency = ?", uid, currency).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&account).Error; err != nil {
+			return fmt.Errorf("get merchant account failed: %w", err)
+		}
+
+		// 校验余额是否足够
+		if account.Money.LessThan(amount) {
+			return fmt.Errorf("insufficient balance: uid=%d, balance=%s, need=%s",
+				uid, account.Money, amount)
+		}
+
+		oldBalance := account.Money
+		oldFreeze := account.FreezeMoney
+		newBalance := account.Money.Sub(amount)
+		newFreeze := account.FreezeMoney.Add(amount)
+
+		// 写冻结资金日志 (60)
+		logEntry := mainmodel.MoneyLog{
+			Currency:    currency,
+			UID:         uid,
+			Money:       amount.Neg(), // 扣减余额
+			OrderNo:     orderNo,
+			Type:        dto.MoneyLogTypeFreeze,
+			Description: fmt.Sprintf("代付下单冻结资金，冻结前=%s，冻结后=%s", oldFreeze, newFreeze),
+			OldBalance:  oldBalance,
+			Balance:     newBalance,
+			CreateTime:  time.Now(),
+		}
+
+		if err := tx.Table("w_money_log").
+			Clauses(clause.OnConflict{DoNothing: true}). // 幂等保护
+			Create(&logEntry).Error; err != nil {
+			return fmt.Errorf("create freeze log failed: %w", err)
+		}
+
+		// 如果日志没写成功，说明已处理过该订单，直接返回成功（幂等）
+		if logEntry.ID == 0 {
+			return nil
+		}
+
+		// 更新账户余额 + 冻结金额
+		if err := tx.Table("w_merchant_money").
+			Where("uid = ? AND currency = ?", uid, currency).
+			Updates(map[string]interface{}{
+				"money":        newBalance,
+				"freeze_money": newFreeze,
+				"update_time":  time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("update merchant account failed: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// HandlePayoutCallback 处理代付回调资金逻辑
+// status = true 表示代付成功；false 表示代付失败（解冻回余额）
+func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool) error {
+	if err := d.checkDB(); err != nil {
+		return fmt.Errorf("handle payout callback failed: %w", err)
+	}
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return fmt.Errorf("invalid amount: %s", amount.String())
+	}
+
+	return d.DB.Transaction(func(tx *gorm.DB) error {
+		// 获取商户账户
+		var account mainmodel.MerchantMoney
+		if err := tx.Table("w_merchant_money").
+			Where("uid = ? AND currency = ?", uid, currency).
+			First(&account).Error; err != nil {
+			return fmt.Errorf("get merchant account failed: %w", err)
+		}
+
+		oldBalance := account.Money
+		// oldFreeze := account.FreezeMoney // 未使用可删除
+
+		// 冻结足额校验（成功/失败两种路径都需要先从冻结减掉）
+		if account.FreezeMoney.LessThan(amount) {
+			return fmt.Errorf("insufficient frozen funds: uid=%d, frozen=%s, need=%s",
+				uid, account.FreezeMoney.String(), amount.String())
+		}
+
+		if status {
+			// ===== 代付成功：仅从冻结扣减，不回余额 =====
+			newFreeze := account.FreezeMoney.Sub(amount)
+
+			// 代付出账日志（余额不变，记录动作）
+			payoutLog := mainmodel.MoneyLog{
+				Currency:    currency,
+				UID:         uid,
+				Money:       amount.Neg(), // 记账为出账金额；Balance 不变仅用于展示可用余额
+				OrderNo:     orderNo,
+				Type:        dto.MoneyLogTypePayout,
+				Description: "代付成功，扣除冻结资金",
+				OldBalance:  oldBalance,
+				Balance:     oldBalance,
+				CreateTime:  time.Now(),
+			}
+			if err := tx.Table("w_money_log").
+				Clauses(clause.OnConflict{DoNothing: true}).
+				Create(&payoutLog).Error; err != nil {
+				return fmt.Errorf("create payout log failed: %w", err)
+			}
+
+			// 更新冻结
+			if err := tx.Table("w_merchant_money").
+				Where("uid = ? AND currency = ?", uid, currency).
+				Updates(map[string]interface{}{
+					"freeze_money": newFreeze,
+					"update_time":  time.Now(),
+				}).Error; err != nil {
+				return fmt.Errorf("update freeze money failed: %w", err)
+			}
+			return nil
+		}
+
+		// ===== 代付失败：冻结减掉 + 余额加回，写两条日志 =====
+		newFreeze := account.FreezeMoney.Sub(amount)
+		newBalance := account.Money.Add(amount)
+
+		// 删除冻结日志 (62) —— 表示从冻结池扣除该笔冻结
+		delFreezeLog := mainmodel.MoneyLog{
+			Currency:    currency,
+			UID:         uid,
+			Money:       amount.Neg(), // 动作金额（冻结侧减少）
+			OrderNo:     orderNo,
+			Type:        dto.MoneyLogTypeUnfreezeDel,
+			Description: "代付失败，取消冻结资金",
+			OldBalance:  oldBalance,
+			Balance:     oldBalance, // 可用余额此时仍未变
+			CreateTime:  time.Now(),
+		}
+		if err := tx.Table("w_money_log").
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&delFreezeLog).Error; err != nil {
+			return fmt.Errorf("create unfreezeDel log failed: %w", err)
+		}
+
+		// 解冻资金退回余额日志 (61)
+		unfreezeLog := mainmodel.MoneyLog{
+			Currency:    currency,
+			UID:         uid,
+			Money:       amount, // 回到可用余额
+			OrderNo:     orderNo,
+			Type:        dto.MoneyLogTypeUnfreeze,
+			Description: "代付失败，解冻资金退回余额",
+			OldBalance:  oldBalance,
+			Balance:     newBalance,
+			CreateTime:  time.Now(),
+		}
+		if err := tx.Table("w_money_log").
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&unfreezeLog).Error; err != nil {
+			return fmt.Errorf("create unfreeze log failed: %w", err)
+		}
+
+		// 同步账户（余额 + 冻结）
+		if err := tx.Table("w_merchant_money").
+			Where("uid = ? AND currency = ?", uid, currency).
+			Updates(map[string]interface{}{
+				"money":        newBalance,
+				"freeze_money": newFreeze,
+				"update_time":  time.Now(),
+			}).Error; err != nil {
+			return fmt.Errorf("update merchant account failed: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // CreateMoneyLog 创建用户资金日志（带事务）
 func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 	if err := d.checkDB(); err != nil {
@@ -190,32 +377,24 @@ func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 	}
 
 	log.Printf("创建用户资金日志结算数据: %+v", moneyLog)
+
 	return d.DB.Transaction(func(tx *gorm.DB) error {
-		// 检查是否已存在记录
-		var existing mainmodel.MoneyLog
-		err := tx.Table("w_money_log").
-			Where("uid = ? AND order_no = ? AND type = ?", moneyLog.UID, moneyLog.OrderNo, moneyLog.Type).
-			First(&existing).Error
-
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("check existing record failed: %w", err)
-		}
-		if err == nil {
-			// 已存在，不重复插入
-			return nil
-		}
-
-		// 获取商户账户信息
+		// 获取商户账户
 		var account mainmodel.MerchantMoney
-		err = tx.Table("w_merchant_money").
+		errAcc := tx.Table("w_merchant_money").
 			Where("uid = ? AND currency = ?", moneyLog.UID, moneyLog.Currency).
 			First(&account).Error
-
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("get merchant money failed: %w", err)
+		if errAcc != nil && !errors.Is(errAcc, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("get merchant money failed: %w", errAcc)
 		}
 
-		// 创建资金日志
+		// 设置余额
+		oldBalance := decimal.NewFromInt(0)
+		if errAcc == nil {
+			oldBalance = account.Money
+		}
+
+		// 插入资金日志（带唯一约束保护）
 		newLog := mainmodel.MoneyLog{
 			Currency:    moneyLog.Currency,
 			UID:         moneyLog.UID,
@@ -224,23 +403,30 @@ func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 			Type:        moneyLog.Type,
 			Operator:    moneyLog.Operator,
 			Description: moneyLog.Description,
-			OldBalance:  account.Money,
-			Balance:     account.Money.Add(moneyLog.Money),
+			OldBalance:  oldBalance,
+			Balance:     oldBalance.Add(moneyLog.Money),
 			CreateTime:  time.Now(),
 		}
 
-		if err := tx.Table("w_money_log").Create(&newLog).Error; err != nil {
+		if err := tx.Table("w_money_log").
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&newLog).Error; err != nil {
 			return fmt.Errorf("create money log failed: %w", err)
 		}
 
-		// 更新商户资金
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 创建新记录
+		// 如果日志没插入（可能因为唯一约束冲突），直接返回成功，不更新账户
+		if newLog.ID == 0 {
+			return nil
+		}
+
+		// 更新或创建账户
+		if errors.Is(errAcc, gorm.ErrRecordNotFound) {
+			// 新建账户
 			newAccount := mainmodel.MerchantMoney{
 				UID:         moneyLog.UID,
 				Currency:    moneyLog.Currency,
 				Money:       moneyLog.Money,
-				FreezeMoney: decimal.NewFromFloat(0),
+				FreezeMoney: decimal.Zero,
 				CreateTime:  time.Now(),
 				UpdateTime:  time.Now(),
 			}
@@ -248,14 +434,13 @@ func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 				return fmt.Errorf("create merchant money failed: %w", err)
 			}
 		} else {
-			// 更新现有记录
-			updateData := map[string]interface{}{
-				"money":       account.Money.Add(moneyLog.Money),
-				"update_time": time.Now(),
-			}
+			// 更新账户余额
 			if err := tx.Table("w_merchant_money").
 				Where("uid = ? AND currency = ?", moneyLog.UID, moneyLog.Currency).
-				Updates(updateData).Error; err != nil {
+				Updates(map[string]interface{}{
+					"money":       account.Money.Add(moneyLog.Money),
+					"update_time": time.Now(),
+				}).Error; err != nil {
 				return fmt.Errorf("update merchant money failed: %w", err)
 			}
 		}
@@ -298,8 +483,8 @@ func (d *MainDao) UpsertMerchantMoney(merchantMoney dto.MerchantMoney) error {
 	})
 }
 
-// CreateAgentMoneyLog 创建代理收益资金日志（带事务）
-func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney) error {
+// CreateAgentMoneyLog 创建代理收益资金日志+更新账户余额+资金日志（带事务）
+func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney, moneyLogType int8, remark string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("create agent money log failed: %w", err)
 	}
@@ -307,29 +492,25 @@ func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney) error {
 	if agentMoney.AID <= 0 {
 		return nil
 	}
+	if agentMoney.Money.LessThanOrEqual(decimal.Zero) {
+		return nil
+	}
 
 	return d.DB.Transaction(func(tx *gorm.DB) error {
-		// 检查是否已存在记录
+		// 检查是否已存在代理佣金记录（避免重复插入）
 		var existing mainmodel.AgentMoney
 		err := tx.Table("w_agent_money").
 			Where("a_id = ? AND order_no = ? AND type = ?", agentMoney.AID, agentMoney.OrderNo, agentMoney.Type).
 			First(&existing).Error
-
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("check existing agent money failed: %w", err)
 		}
 		if err == nil {
-			// 已存在，不重复插入
-			return nil
+			return nil // 已存在，直接返回
 		}
 
-		zero := decimal.NewFromFloat(0)
-		if agentMoney.Money.LessThanOrEqual(zero) {
-			return nil
-		}
-
-		// 创建代理资金日志
-		newLog := mainmodel.AgentMoney{
+		// 插入代理佣金日志
+		agentLog := mainmodel.AgentMoney{
 			Currency:   agentMoney.Currency,
 			AID:        agentMoney.AID,
 			MID:        agentMoney.MID,
@@ -340,36 +521,65 @@ func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney) error {
 			Money:      agentMoney.Money,
 			CreateTime: time.Now(),
 		}
-
-		if err := tx.Table("w_agent_money").Create(&newLog).Error; err != nil {
-			return fmt.Errorf("create agent money failed: %w", err)
+		if err := tx.Table("w_agent_money").Create(&agentLog).Error; err != nil {
+			return fmt.Errorf("create agent money log failed: %w", err)
 		}
 
-		// 更新代理商户资金
-		var agentAccount mainmodel.MerchantMoney
-		err = tx.Table("w_merchant_money").
+		// 查代理账户资金（统一使用 AID，而不是 MID）
+		var account mainmodel.MerchantMoney
+		errAcc := tx.Table("w_merchant_money").
 			Where("uid = ? AND currency = ?", agentMoney.AID, agentMoney.Currency).
-			First(&agentAccount).Error
+			First(&account).Error
+		if errAcc != nil && !errors.Is(errAcc, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("get agent account failed: %w", errAcc)
+		}
 
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// 创建新记录
+		// 生成资金日志
+		oldBalance := decimal.Zero
+		if errAcc == nil {
+			oldBalance = account.Money
+		}
+
+		moneyLogModel := mainmodel.MoneyLog{
+			Currency:    agentMoney.Currency,
+			UID:         agentMoney.AID, // ✅ 改成代理 ID
+			Money:       agentMoney.Money,
+			OrderNo:     agentMoney.OrderNo,
+			Type:        moneyLogType, // 固定类型：代理代收佣金
+			Operator:    "",           // 可传操作人
+			Description: remark,
+			OldBalance:  oldBalance,
+			Balance:     oldBalance.Add(agentMoney.Money),
+			CreateTime:  time.Now(),
+		}
+
+		if err := tx.Table("w_money_log").
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&moneyLogModel).Error; err != nil {
+			return fmt.Errorf("create money log failed: %w", err)
+		}
+
+		// 如果日志没插入（可能因为唯一约束冲突），直接返回
+		if moneyLogModel.ID == 0 {
+			return nil
+		}
+
+		// 更新或创建代理资金账户
+		if errors.Is(errAcc, gorm.ErrRecordNotFound) {
 			newAccount := mainmodel.MerchantMoney{
 				UID:         agentMoney.AID,
 				Currency:    agentMoney.Currency,
 				Money:       agentMoney.Money,
-				FreezeMoney: decimal.NewFromFloat(0),
+				FreezeMoney: decimal.Zero,
 				CreateTime:  time.Now(),
 				UpdateTime:  time.Now(),
 			}
 			if err := tx.Table("w_merchant_money").Create(&newAccount).Error; err != nil {
 				return fmt.Errorf("create agent account failed: %w", err)
 			}
-		} else if err != nil {
-			return fmt.Errorf("get agent account failed: %w", err)
 		} else {
-			// 更新现有记录
 			updateData := map[string]interface{}{
-				"money":       agentAccount.Money.Add(agentMoney.Money),
+				"money":       account.Money.Add(agentMoney.Money),
 				"update_time": time.Now(),
 			}
 			if err := tx.Table("w_merchant_money").

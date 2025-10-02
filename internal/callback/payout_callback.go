@@ -34,68 +34,95 @@ const (
 )
 
 // HandleUpstreamCallback 处理上游代付回调
+// HandleUpstreamCallback 处理上游代付回调
 func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessage) error {
-	// 原 payoutProcessOrderNotification 的逻辑全部迁移到这里
-	// 转成 uint64
+	// 1) 转换商户订单号
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
 	if err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] 平台对接上游的商户订单号,转换失败: %v", err)
+		return fmt.Errorf("[CALLBACK-PAYOUT] 商户订单号转换失败: %v", err)
 	}
-	txTable := shard.UpOutOrderShard.GetTable(mOrderIdNum, time.Now())
 
+	// 2) 获取上游订单
+	txTable := shard.UpOutOrderShard.GetTable(mOrderIdNum, time.Now())
 	var upOrder orderModel.UpstreamTx
-	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] tx order not found with MOrderID %v: %w", mOrderIdNum, err)
+	if err := dal.OrderDB.Table(txTable).
+		Where("up_order_id = ?", mOrderIdNum).
+		First(&upOrder).Error; err != nil {
+		return fmt.Errorf("[CALLBACK-PAYOUT] 上游订单不存在 MOrderID=%v: %w", mOrderIdNum, err)
 	}
-	// 验证上游供应商IP
+
+	// 3) 验证上游IP
 	if !verifyUpstreamWhitelist(upOrder.SupplierId, msg.UpIpAddress) {
-		return fmt.Errorf("[CALLBACK-PAYOUT] the upstream supplier IP is not in the whitelist. MOrderID:%v, upstreamId:%v, ipAddress:%s", mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
+		return fmt.Errorf("[CALLBACK-PAYOUT] 上游IP不在白名单内, MOrderID=%v, upstreamId=%v, ip=%s",
+			mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
 	}
-	// 更新上游订单状态
-	upOrder.Status = s.payoutGetUpStatusMessage(msg.Status)
+
+	// 4) 更新上游订单状态
+	newStatus := s.payoutGetUpStatusMessage(msg.Status)
+	upOrder.Status = newStatus
 	upOrder.UpOrderNo = msg.UpOrderID
 	upOrder.NotifyTime = utils.PtrTime(time.Now())
-	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] update up_out_order not found with MOrderID %v: %w", mOrderIdNum, err)
+	if err := dal.OrderDB.Table(txTable).
+		Where("up_order_id = ?", mOrderIdNum).
+		Updates(map[string]interface{}{
+			"status":      upOrder.Status,
+			"up_order_no": upOrder.UpOrderNo,
+			"notify_time": upOrder.NotifyTime,
+		}).Error; err != nil {
+		return fmt.Errorf("[CALLBACK-PAYOUT] 更新上游订单失败 MOrderID=%v: %w", mOrderIdNum, err)
 	}
 
-	// 根据商户订单号查找订单
-	var order orderModel.MerchantOrder
+	// 5) 获取商户订单
 	orderTable := shard.OutOrderShard.GetTable(upOrder.OrderID, time.Now())
-	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] merchant order not found with MOrderID %v: %w", upOrder.OrderID, err)
+	var order orderModel.MerchantOrder
+	if err := dal.OrderDB.Table(orderTable).
+		Where("order_id = ?", upOrder.OrderID).
+		First(&order).Error; err != nil {
+		return fmt.Errorf("[CALLBACK-PAYOUT] 商户订单不存在 OrderID=%v: %w", upOrder.OrderID, err)
 	}
 
-	order.Status = s.payoutGetUpStatusMessage(msg.Status)
+	// 更新商户订单状态
+	order.Status = newStatus
 	order.NotifyTime = utils.PtrTime(time.Now())
-	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).Updates(&order).Error; err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] update order not found with MOrderID %v: %w", upOrder.OrderID, err)
+	if err := dal.OrderDB.Table(orderTable).
+		Where("order_id = ?", upOrder.OrderID).
+		Updates(map[string]interface{}{
+			"status":      order.Status,
+			"notify_time": order.NotifyTime,
+		}).Error; err != nil {
+		return fmt.Errorf("[CALLBACK-PAYOUT] 更新商户订单失败 OrderID=%v: %w", upOrder.OrderID, err)
 	}
 
-	var mainDao *dao.MainDao
-	mainDao = dao.NewMainDao()
+	// 6) 校验商户
+	mainDao := dao.NewMainDao()
 	merchant, err := mainDao.GetMerchantId(upOrder.MerchantID)
 	if err != nil || merchant == nil || merchant.Status != 1 {
-		return fmt.Errorf("[CALLBACK-PAYOUT] merchant not found or inactive: %v", err)
+		return fmt.Errorf("[CALLBACK-PAYOUT] 商户无效 merchantID=%v, err=%v", upOrder.MerchantID, err)
 	}
 
-	// 如果订单成功就结算商户与代理分润
-	if s.payoutConvertStatus(msg.Status) == "SUCCESS" {
-		var settleService = settlement.NewSettlement()
-		var settlementResult dto.SettlementResult
-		settlementResult = dto.SettlementResult(order.SettleSnapshot)
-		err := settleService.DoSettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
-		if err != nil {
-			return fmt.Errorf("[CALLBACK-PAYOUT] settlement  failed err: %v", err)
-		}
+	// 7) 结算逻辑
+	settleService := settlement.NewSettlement()
+	settlementResult := dto.SettlementResult(order.SettleSnapshot)
 
-		// 14) 异步处理统计数据
+	statusText := s.payoutConvertStatus(msg.Status)
+	isSuccess := statusText == "SUCCESS"
+
+	if err := settleService.DoPayoutSettlement(settlementResult,
+		strconv.FormatUint(merchant.MerchantID, 10),
+		order.OrderID,
+		isSuccess,
+	); err != nil {
+		return fmt.Errorf("[CALLBACK-PAYOUT] 结算失败 OrderID=%v, err=%w", order.OrderID, err)
+	}
+
+	// 8) 异步统计（仅成功时）
+	if isSuccess {
 		go func() {
 			country, cErr := mainDao.GetCountry(order.Currency)
 			if cErr != nil {
 				log.Printf("获取国家信息异常: %v", cErr)
 			}
-			err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
+			if err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
 				OrderID:    strconv.FormatUint(order.OrderID, 10),
 				MerchantID: order.MID,
 				CountryID:  country.ID,
@@ -109,38 +136,37 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 				OrderType:  "payout",
 				Currency:   order.Currency,
 				CreateTime: time.Now(),
-			})
-			if err != nil {
-				return
+			}); err != nil {
+				log.Printf("发布订单统计失败 OrderID=%v: %v", order.OrderID, err)
 			}
 		}()
 	}
 
-	// 构建回调通知负载
+	// 9) 通知商户
 	payload := dto.PayoutNotifyMerchantPayload{
 		TranFlow:    order.MOrderID,
 		PaySerialNo: strconv.FormatUint(order.OrderID, 10),
-		//Status:      convertStatus(msg.Status),
-		Status:     msg.Status,
-		Msg:        s.payoutGetStatusMessage(msg.Status),
-		MerchantNo: merchant.AppId,
-		Amount:     msg.Amount.String(),
+		Status:      msg.Status,
+		Msg:         s.payoutGetStatusMessage(msg.Status),
+		MerchantNo:  merchant.AppId,
+		Amount:      msg.Amount.String(),
 	}
 	payload.Sign = s.payoutGenerateSign(payload, merchant.ApiKey)
 
-	// 执行通知，带重试
 	var lastErr error
 	for i := 1; i <= payoutMaxRetry; i++ {
 		lastErr = s.payoutNotifyMerchant(order.NotifyURL, payload)
 		if lastErr == nil {
-			log.Printf("✅ [CALLBACK-PAYOUT] Successfully notified merchant for order: %s (try %d)", msg.MOrderID, i)
+			log.Printf("✅ [CALLBACK-PAYOUT] 已成功通知商户 OrderID=%v (第%d次)", order.OrderID, i)
 			return nil
 		}
-		log.Printf("⚠️ [CALLBACK-PAYOUT] Notify merchant failed (try %d/%d): %v", i, payoutMaxRetry, lastErr)
+		log.Printf("⚠️ [CALLBACK-PAYOUT] 通知商户失败 OrderID=%v (第%d/%d次): %v",
+			order.OrderID, i, payoutMaxRetry, lastErr)
 		time.Sleep(time.Duration(i*2) * time.Second)
 	}
-	return fmt.Errorf("[CALLBACK-PAYOUT] failed to notify merchant %v after %d retries: %v", payload.MerchantNo, payoutMaxRetry, lastErr)
-	// 包括：订单状态更新、结算、商户通知
+
+	return fmt.Errorf("[CALLBACK-PAYOUT] 通知商户失败 merchant=%v, orderID=%v, retries=%d, lastErr=%v",
+		payload.MerchantNo, order.OrderID, payoutMaxRetry, lastErr)
 }
 
 // 通知商户并检查响应
