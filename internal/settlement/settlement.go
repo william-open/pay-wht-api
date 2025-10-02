@@ -73,7 +73,7 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 
 // DoPayoutSettlement 处理代付订单结算逻辑
 // status = true 表示代付成功，false 表示代付失败
-func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, status bool, orderAmount decimal.Decimal, operator string) error {
+func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, status bool, orderAmount decimal.Decimal) error {
 	orderNo := strconv.FormatUint(orderId, 10)
 
 	log.Printf("[SETTLEMENT] 开始代付结算: 商户=%v, 订单号=%v, 金额=%v %s, 状态=%v, 数据=%+v",
@@ -96,7 +96,7 @@ func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, or
 		req.MerchantRecv,
 		status,
 		orderAmount,
-		operator,
+		merchant.NickName,
 	); err != nil {
 		return fmt.Errorf("[SETTLEMENT] 商户资金结算失败, merchantID=%v, orderNo=%v, 金额=%v, err=%w",
 			merchant.MerchantID, orderNo, req.MerchantRecv, err)
