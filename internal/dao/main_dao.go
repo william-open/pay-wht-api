@@ -256,7 +256,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 
 // HandlePayoutCallback 处理代付回调资金逻辑
 // status = true 表示代付成功；false 表示代付失败（解冻回余额）
-func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool, orderAmount decimal.Decimal) error {
+func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool, orderAmount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("handle payout callback failed: %w", err)
 	}
@@ -296,6 +296,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 				Description: "代付成功，扣除冻结资金",
 				OldBalance:  oldBalance,
 				Balance:     oldBalance,
+				Operator:    operator,
 				CreateTime:  time.Now(),
 			}
 			if err := tx.Table("w_money_log").
@@ -331,6 +332,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 			OldBalance:  oldBalance,
 			Balance:     oldBalance, // 可用余额此时仍未变
 			CreateTime:  time.Now(),
+			Operator:    operator,
 		}
 		if err := tx.Table("w_money_log").
 			Clauses(clause.OnConflict{DoNothing: true}).
@@ -349,6 +351,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 			OldBalance:  oldBalance,
 			Balance:     newBalance,
 			CreateTime:  time.Now(),
+			Operator:    operator,
 		}
 		if err := tx.Table("w_money_log").
 			Clauses(clause.OnConflict{DoNothing: true}).
