@@ -185,7 +185,7 @@ func (d *MainDao) GetMerchantAccount(mId string) (dto.MerchantMoney, error) {
 }
 
 // FreezePayout 创建代付订单时冻结资金并写冻结日志
-func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount decimal.Decimal) error {
+func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("freeze payout failed: %w", err)
 	}
@@ -224,6 +224,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 			Description: fmt.Sprintf("代付下单冻结资金，冻结前=%s，冻结后=%s", oldFreeze, newFreeze),
 			OldBalance:  oldBalance,
 			Balance:     newBalance,
+			Operator:    operator,
 			CreateTime:  time.Now(),
 		}
 
@@ -255,7 +256,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 
 // HandlePayoutCallback 处理代付回调资金逻辑
 // status = true 表示代付成功；false 表示代付失败（解冻回余额）
-func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool) error {
+func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool, orderAmount decimal.Decimal) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("handle payout callback failed: %w", err)
 	}
@@ -276,20 +277,20 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 		// oldFreeze := account.FreezeMoney // 未使用可删除
 
 		// 冻结足额校验（成功/失败两种路径都需要先从冻结减掉）
-		if account.FreezeMoney.LessThan(amount) {
+		if account.FreezeMoney.LessThan(orderAmount) {
 			return fmt.Errorf("insufficient frozen funds: uid=%d, frozen=%s, need=%s",
-				uid, account.FreezeMoney.String(), amount.String())
+				uid, account.FreezeMoney.String(), orderAmount.String())
 		}
 
 		if status {
 			// ===== 代付成功：仅从冻结扣减，不回余额 =====
-			newFreeze := account.FreezeMoney.Sub(amount)
+			newFreeze := account.FreezeMoney.Sub(orderAmount)
 
 			// 代付出账日志（余额不变，记录动作）
 			payoutLog := mainmodel.MoneyLog{
 				Currency:    currency,
 				UID:         uid,
-				Money:       amount.Neg(), // 记账为出账金额；Balance 不变仅用于展示可用余额
+				Money:       orderAmount.Neg(), // 记账为出账金额；Balance 不变仅用于展示可用余额
 				OrderNo:     orderNo,
 				Type:        dto.MoneyLogTypePayout,
 				Description: "代付成功，扣除冻结资金",
@@ -316,14 +317,14 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 		}
 
 		// ===== 代付失败：冻结减掉 + 余额加回，写两条日志 =====
-		newFreeze := account.FreezeMoney.Sub(amount)
-		newBalance := account.Money.Add(amount)
+		newFreeze := account.FreezeMoney.Sub(orderAmount)
+		newBalance := account.Money.Add(orderAmount)
 
 		// 删除冻结日志 (62) —— 表示从冻结池扣除该笔冻结
 		delFreezeLog := mainmodel.MoneyLog{
 			Currency:    currency,
 			UID:         uid,
-			Money:       amount.Neg(), // 动作金额（冻结侧减少）
+			Money:       orderAmount.Neg(), // 动作金额（冻结侧减少）
 			OrderNo:     orderNo,
 			Type:        dto.MoneyLogTypeUnfreezeDel,
 			Description: "代付失败，取消冻结资金",
@@ -341,7 +342,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amo
 		unfreezeLog := mainmodel.MoneyLog{
 			Currency:    currency,
 			UID:         uid,
-			Money:       amount, // 回到可用余额
+			Money:       orderAmount, // 回到可用余额
 			OrderNo:     orderNo,
 			Type:        dto.MoneyLogTypeUnfreeze,
 			Description: "代付失败，解冻资金退回余额",

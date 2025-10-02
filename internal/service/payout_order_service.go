@@ -446,7 +446,7 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 			return fmt.Errorf("create order index failed: %w", err)
 		}
 		// 冻结商户资金
-		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), amount)
+		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), amount, merchant.NickName)
 		if freezeErr != nil {
 			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
 		}
@@ -479,9 +479,9 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 }
 
 // 冻结资金
-func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo string, amount decimal.Decimal) error {
+func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo string, amount decimal.Decimal, operator string) error {
 
-	err := s.mainDao.FreezePayout(uid, currency, orderNo, amount)
+	err := s.mainDao.FreezePayout(uid, currency, orderNo, amount, operator)
 	if err != nil {
 		return fmt.Errorf("freeze merchant money failed: %w", err)
 	}

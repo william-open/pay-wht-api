@@ -111,6 +111,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		strconv.FormatUint(merchant.MerchantID, 10),
 		order.OrderID,
 		isSuccess,
+		order.Amount,
 	); err != nil {
 		return fmt.Errorf("[CALLBACK-PAYOUT] 结算失败 OrderID=%v, err=%w", order.OrderID, err)
 	}
