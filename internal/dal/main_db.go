@@ -17,7 +17,7 @@ var MainDB *gorm.DB
 
 func InitMainDB() {
 	c := config.C.MysqlMain
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=UTC&time_zone='+00:00'",
 		c.Username, c.Password, c.Host, c.Port, c.Database, c.Charset)
 	// 配置日志输出
 	newLogger := logger.New(

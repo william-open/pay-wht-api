@@ -17,7 +17,7 @@ var OrderDB *gorm.DB
 
 func InitOrderDB() {
 	c := config.C.MysqlOrder
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=Local",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=UTC&time_zone='+00:00'",
 		c.Username, c.Password, c.Host, c.Port, c.Database, c.Charset)
 	// 配置日志输出
 	newLogger := logger.New(
