@@ -676,6 +676,8 @@ func (s *ReceiveOrderService) callUpstreamService(
 		RedirectUrl:  req.RedirectUrl,
 		ProductInfo:  req.ProductInfo,
 		PayType:      req.PayType,
+		AccNo:        req.AccNo,
+		AccName:      req.AccName,
 		ProviderKey:  payChannelProduct.InterfaceCode,
 		MchOrderId:   strconv.FormatUint(txId, 10),
 		ApiKey:       payChannelProduct.UpApiKey,
