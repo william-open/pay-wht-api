@@ -174,7 +174,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	// 6 商户通道
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
-		return resp, errors.New("merchant channel invalid")
+		return resp, errors.New(fmt.Sprintf("merchant channel invalid,payType: %s", req.PayType))
 	}
 
 	// 7 选择通道
@@ -360,6 +360,21 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	payChannelProduct *dto.PayProductVo,
 	txId uint64,
 ) (string, error) {
+	// 根据接平台银行编码查询平台银行信息
+	platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode)
+	if pbErr != nil {
+		return "", fmt.Errorf(fmt.Sprintf("Bank code does not exist,%s", req.BankCode))
+	}
+	var bankName, bankCode string
+	// 根据接口ID+平台银行编码+国家货币查询对应上游银行编码+银行名称
+	upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
+	if ubErr != nil {
+		bankCode = platformBank.Code
+		bankName = platformBank.Name
+	} else {
+		bankCode = upstreamBank.UpstreamBankCode
+		bankName = upstreamBank.UpstreamBankName
+	}
 	var upstreamRequest dto.UpstreamRequest
 	upstreamRequest.Currency = payChannelProduct.Currency
 	upstreamRequest.Amount = req.Amount
@@ -374,8 +389,8 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.PayMethod = req.PayMethod
 	upstreamRequest.AccName = req.AccName
 	upstreamRequest.AccNo = req.AccNo
-	upstreamRequest.BankName = req.BankName
-	upstreamRequest.BankCode = req.BankCode
+	upstreamRequest.BankName = bankName
+	upstreamRequest.BankCode = bankCode
 	upstreamRequest.UpstreamCode = payChannelProduct.UpstreamCode
 	upstreamRequest.QueryUrl = payChannelProduct.PayoutQueryApi
 	upstreamRequest.SubmitUrl = payChannelProduct.PayoutApi

@@ -184,6 +184,32 @@ func (d *MainDao) GetMerchantAccount(mId string) (dto.MerchantMoney, error) {
 	return ch, nil
 }
 
+// QueryUpstreamBankInfo 接口ID+平台银行编码+货币符号查询上游银行信息
+func (d *MainDao) QueryUpstreamBankInfo(interfaceId int, internalBankCode string, currency string) (dto.BankCodeMappingDto, error) {
+	if err := d.checkDB(); err != nil {
+		return dto.BankCodeMappingDto{}, fmt.Errorf("get merchant account failed: %w", err)
+	}
+
+	var ch dto.BankCodeMappingDto
+	if err := d.DB.Table("w_bank_code_mapping").Where("interface_id=? and internal_bank_code=? and currency=? and status = ?", interfaceId, internalBankCode, currency, 1).First(&ch).Error; err != nil {
+		return dto.BankCodeMappingDto{}, fmt.Errorf("query failed: %w", err)
+	}
+	return ch, nil
+}
+
+// QueryPlatformBankInfo 查询平台银行信息
+func (d *MainDao) QueryPlatformBankInfo(internalBankCode string) (dto.BankCodeDto, error) {
+	if err := d.checkDB(); err != nil {
+		return dto.BankCodeDto{}, fmt.Errorf("get merchant account failed: %w", err)
+	}
+
+	var ch dto.BankCodeDto
+	if err := d.DB.Table("w_bank_code").Where("code=? and  status=?", internalBankCode, 1).First(&ch).Error; err != nil {
+		return dto.BankCodeDto{}, fmt.Errorf("query failed: %w", err)
+	}
+	return ch, nil
+}
+
 // FreezePayout 创建代付订单时冻结资金并写冻结日志
 func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
