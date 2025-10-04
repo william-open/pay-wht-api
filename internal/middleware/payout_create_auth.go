@@ -82,9 +82,17 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
-		// 查询商户信息
+		// 核心库实例
 		mainDao := dao.NewMainDao()
+		// 根据接平台银行编码查询平台银行信息
+		_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode)
+		if pbErr != nil {
+			resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
+			log.Printf(resultMsg)
+			c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
+			c.Abort()
+		}
+		// 查询商户信息
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
 			log.Printf("商户不存在: %v", merchant)
