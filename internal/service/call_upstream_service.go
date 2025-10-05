@@ -33,6 +33,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 		"payPhone":    req.PayPhone,
 		"bankCode":    req.BankCode,
 		"bankName":    req.BankName,
+		"payMethod":   req.PayMethod,
 		"mode":        req.Mode,
 		"clientIp":    req.ClientIp,
 		"notifyUrl":   req.NotifyUrl, // 添加通知URL
