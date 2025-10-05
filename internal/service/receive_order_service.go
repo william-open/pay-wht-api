@@ -670,6 +670,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 	if req == nil {
 		return "", errors.New("callUpstreamService req cannot be nil")
 	}
+	log.Printf("[Upstream-Receive-origin],请求参数: %+v", req)
 	upstreamRequest := dto.UpstreamRequest{
 		Currency:     payChannelProduct.Currency,
 		Amount:       req.Amount,
@@ -678,6 +679,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 		PayType:      req.PayType,
 		AccNo:        req.AccNo,
 		AccName:      req.AccName,
+		PayPhone:     req.PayPhone,
 		ProviderKey:  payChannelProduct.InterfaceCode,
 		MchOrderId:   strconv.FormatUint(txId, 10),
 		ApiKey:       payChannelProduct.UpApiKey,
