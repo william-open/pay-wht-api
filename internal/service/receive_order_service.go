@@ -690,6 +690,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 		BankCode:     req.BankCode,
 		BankName:     req.BankName,
 		PayMethod:    req.PayMethod,
+		PayEmail:     req.PayEmail,
 		NotifyUrl:    req.NotifyUrl,
 		Mode:         "receive",
 		ClientIp:     req.ClientId,
