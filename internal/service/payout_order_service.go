@@ -387,6 +387,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.IdentityType = req.IdentityType
 	upstreamRequest.IdentityNum = req.IdentityNum
 	upstreamRequest.PayMethod = req.PayMethod
+	upstreamRequest.PayPhone = req.PayPhone
 	upstreamRequest.AccName = req.AccName
 	upstreamRequest.AccNo = req.AccNo
 	upstreamRequest.BankName = bankName
