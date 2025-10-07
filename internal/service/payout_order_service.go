@@ -521,7 +521,8 @@ func (s *PayoutOrderService) createOrder(
 	}
 
 	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
-	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100))      //上游成本费用
+	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100)) //上游成本费用
+	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
 	profitFee := orderFee.Sub(costFee)
 	m := &ordermodel.MerchantPayOutOrderM{
