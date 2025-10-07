@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dto"
+	orderModel "wht-order-api/internal/model/order"
 	"wht-order-api/internal/notify"
+	"wht-order-api/internal/settlement"
 	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 )
@@ -116,7 +119,7 @@ func isValidURL(u string) bool {
 
 // CallUpstreamPayoutService 调用 PHP 服务下单 -代付
 // CallUpstreamPayoutService 调用上游服务下单-代付（支持上下文超时控制）
-func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (string, string, string, error) {
+func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, merchantId uint64, order *orderModel.MerchantPayOutOrderM) (string, string, string, error) {
 	// 组装请求参数
 	params := map[string]interface{}{
 		"mchNo":        req.MchNo,
@@ -186,12 +189,20 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (st
 	// 检查响应码（支持字符串和数字类型）
 	if !isSuccessCode(response.Code) {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
+		rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
+		if rollbackErr != nil {
+			return "", "", "", rollbackErr
+		}
 		return "", "", "", fmt.Errorf("上游错误[%v]: %s", response.Code, response.Msg)
 	}
 	// ✅ 只认 data.code == "0" 成功
 	log.Printf("[Upstream-Payout]上游供应商返回code: %s", response.Data.Code)
 	if response.Code != "0" || response.Data.Code != "0" {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
+		rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
+		if rollbackErr != nil {
+			return "", "", "", rollbackErr
+		}
 		return "", "", "", fmt.Errorf("上游错误[%v]: %v", response.Code, response.Data.Msg)
 	}
 
@@ -199,4 +210,19 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest) (st
 		response.Data.UpOrderNo, response.Data.MOrderId, response.Data.Status)
 
 	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
+}
+
+// 代付失败，回滚资金
+func rollbackPayoutAmount(merchantId string, order *orderModel.MerchantPayOutOrderM, isSuccess bool) error {
+	settleService := settlement.NewSettlement()
+	settlementResult := dto.SettlementResult(order.SettleSnapshot)
+	if err := settleService.DoPayoutSettlement(settlementResult,
+		merchantId,
+		order.OrderID,
+		isSuccess,
+		order.Amount,
+	); err != nil {
+		return fmt.Errorf("[ROLLBACK-PAYOUT] 回滚失败 OrderID=%v, err=%w", order.OrderID, err)
+	}
+	return nil
 }
