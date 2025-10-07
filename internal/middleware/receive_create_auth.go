@@ -146,6 +146,7 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			"pay_email":    req.PayEmail,
 			"pay_phone":    req.PayPhone,
 			"bank_code":    req.BankCode,
+			"pay_method":   req.PayMethod,
 			"bank_name":    req.BankName,
 			"sign":         req.Sign,
 		}

@@ -241,7 +241,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	// 11 调用上游（失败降级）
 	var lastErr error
 	for _, product := range products {
-		_, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId)
+		_, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId, order)
 		if err == nil {
 			s.clearUpstreamFail(uint64(product.UpstreamId))
 			lastErr = nil
@@ -329,6 +329,7 @@ func (s *PayoutOrderService) callUpstreamService(
 	req *dto.CreatePayoutOrderReq,
 	payChannelProduct *dto.PayProductVo,
 	txId uint64,
+	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 空指针检查
 	if payChannelProduct == nil {
@@ -344,7 +345,7 @@ func (s *PayoutOrderService) callUpstreamService(
 	// 使用 singleflight 防止重复调用上游
 	key := fmt.Sprintf("upstream:%s:%d", req.TranFlow, txId)
 	result, err, _ := s.upstreamGroup.Do(key, func() (interface{}, error) {
-		return s.callUpstreamServiceInternal(merchant, req, payChannelProduct, txId)
+		return s.callUpstreamServiceInternal(merchant, req, payChannelProduct, txId, order)
 	})
 
 	if err != nil {
@@ -359,6 +360,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	req *dto.CreatePayoutOrderReq,
 	payChannelProduct *dto.PayProductVo,
 	txId uint64,
+	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 根据接平台银行编码查询平台银行信息
 	platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode)
@@ -387,6 +389,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.IdentityType = req.IdentityType
 	upstreamRequest.IdentityNum = req.IdentityNum
 	upstreamRequest.PayMethod = req.PayMethod
+	upstreamRequest.PayPhone = req.PayPhone
 	upstreamRequest.AccName = req.AccName
 	upstreamRequest.AccNo = req.AccNo
 	upstreamRequest.BankName = bankName
@@ -401,7 +404,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	defer cancel()
 
 	// 调用上游服务
-	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest)
+	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
 	if err != nil {
 		return "", err
 	}
@@ -520,7 +523,8 @@ func (s *PayoutOrderService) createOrder(
 	}
 
 	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
-	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100))      //上游成本费用
+	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100)) //上游成本费用
+	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
 	profitFee := orderFee.Sub(costFee)
 	m := &ordermodel.MerchantPayOutOrderM{

@@ -34,7 +34,6 @@ const (
 )
 
 // HandleUpstreamCallback 处理上游代付回调
-// HandleUpstreamCallback 处理上游代付回调
 func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessage) error {
 	// 1) 转换商户订单号
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
