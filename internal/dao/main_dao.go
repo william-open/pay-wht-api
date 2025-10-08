@@ -198,13 +198,13 @@ func (d *MainDao) QueryUpstreamBankInfo(interfaceId int, internalBankCode string
 }
 
 // QueryPlatformBankInfo 查询平台银行信息
-func (d *MainDao) QueryPlatformBankInfo(internalBankCode string) (dto.BankCodeDto, error) {
+func (d *MainDao) QueryPlatformBankInfo(internalBankCode string, currency string) (dto.BankCodeDto, error) {
 	if err := d.checkDB(); err != nil {
 		return dto.BankCodeDto{}, fmt.Errorf("get merchant account failed: %w", err)
 	}
 
 	var ch dto.BankCodeDto
-	if err := d.DB.Table("w_bank_code").Where("code=? and  status=?", internalBankCode, 1).First(&ch).Error; err != nil {
+	if err := d.DB.Table("w_bank_code").Where("currency = ? and code=? and  status=?", currency, internalBankCode, 1).First(&ch).Error; err != nil {
 		return dto.BankCodeDto{}, fmt.Errorf("query failed: %w", err)
 	}
 	return ch, nil

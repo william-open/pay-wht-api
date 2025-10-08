@@ -3,6 +3,7 @@ package mainmodel
 type Merchant struct {
 	MerchantID          uint64 `gorm:"column:m_id;primaryKey"`
 	NickName            string `gorm:"column:nickname"`
+	Currency            string `gorm:"column:currency"`
 	AppId               string `gorm:"column:app_id"`
 	Status              int8   `gorm:"column:status"`
 	UserType            int8   `gorm:"column:user_type"`
