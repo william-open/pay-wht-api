@@ -64,14 +64,14 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 
 	// ✅ 定义响应结构
 	var response struct {
-		Code string `json:"code"` // 顶层code（无用）
-		Msg  string `json:"msg"`
+		Code utils.StringOrNumber `json:"code"` // 顶层code（无用）
+		Msg  string               `json:"msg"`
 		Data struct {
-			Code      string `json:"code"` // ✅ 实际判断的字段
-			Msg       string `json:"msg"`
-			UpOrderNo string `json:"up_order_no"`
-			PayUrl    string `json:"pay_url"`
-			MOrderId  string `json:"m_order_id"`
+			Code      utils.StringOrNumber `json:"code"` // ✅ 实际判断的字段
+			Msg       string               `json:"msg"`
+			UpOrderNo string               `json:"up_order_no"`
+			PayUrl    string               `json:"pay_url"`
+			MOrderId  string               `json:"m_order_id"`
 		} `json:"data"`
 	}
 
@@ -82,7 +82,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	}
 
 	// ✅ 只认 data.code == "0" 成功
-	if response.Code != "0" {
+	if string(response.Code) != "0" {
 		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
 		return "", "", "", fmt.Errorf("上游错误[%s]: %s", response.Data.Code, response.Data.Msg)
 	}
