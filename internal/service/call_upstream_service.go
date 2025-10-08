@@ -76,9 +76,9 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	}
 
 	// ✅ JSON解析
-	if err := json.Unmarshal([]byte(resp), &response); err != nil {
-		log.Printf("[Upstream-Receive] JSON解析失败: %v, 原始响应: %s", err, resp)
-		return "", "", "", fmt.Errorf("响应解析失败: %v", err)
+	if respErr := json.Unmarshal([]byte(resp), &response); respErr != nil {
+		log.Printf("[Upstream-Receive] JSON解析失败: %v, 原始响应: %s", respErr.Error(), resp)
+		return "", "", "", fmt.Errorf("响应解析失败: %v", respErr.Error())
 	}
 
 	// ✅ 只认 data.code == "0" 成功
