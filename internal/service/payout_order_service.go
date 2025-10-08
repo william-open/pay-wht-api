@@ -390,6 +390,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.IdentityNum = req.IdentityNum
 	upstreamRequest.PayMethod = req.PayMethod
 	upstreamRequest.PayPhone = req.PayPhone
+	upstreamRequest.PayEmail = req.PayEmail
 	upstreamRequest.AccName = req.AccName
 	upstreamRequest.AccNo = req.AccNo
 	upstreamRequest.BankName = bankName
