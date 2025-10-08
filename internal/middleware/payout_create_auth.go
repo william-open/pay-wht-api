@@ -84,14 +84,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		}
 		// 核心库实例
 		mainDao := dao.NewMainDao()
-		// 根据接平台银行编码查询平台银行信息
-		_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode)
-		if pbErr != nil {
-			resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
-			log.Printf(resultMsg)
-			c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
-			c.Abort()
-		}
+
 		// 查询商户信息
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
@@ -99,6 +92,15 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "unauthorized"})
 			c.Abort()
 			return
+		}
+
+		// 根据接平台银行编码查询平台银行信息
+		_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+		if pbErr != nil {
+			resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
+			log.Printf(resultMsg)
+			c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
+			c.Abort()
 		}
 
 		// 获取请求IP

@@ -16,6 +16,7 @@ type CreatePayoutOrderReq struct {
 	PayMethod    string `json:"pay_method" binding:"required"`      //支付方式
 	BankCode     string `json:"bank_code" binding:"required"`       //银行编码
 	BankName     string `json:"bank_name" binding:"required"`       //银行名
+	BranchBank   string `json:"branch_bank"`                        //支行银行名
 	PayEmail     string `json:"pay_email"`                          //邮箱
 	PayPhone     string `json:"pay_phone"`                          //手机号
 	IdentityType string `json:"identity_type"`                      //证件类型
