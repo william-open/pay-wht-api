@@ -144,6 +144,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		"notifyUrl":    req.NotifyUrl, // 添加通知URL
 		"submitUrl":    req.SubmitUrl, // 下单URL
 		"queryUrl":     req.QueryUrl,  // 查单URL
+		"clientIp":     req.ClientIp,
 	}
 
 	upstreamUrl := config.C.Upstream.PayoutApiUrl
