@@ -187,7 +187,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	}
 
 	// 检查响应码（支持字符串和数字类型）
-	if !isSuccessCode(response.Code) {
+	if !isSuccessCode(string(response.Code)) {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
 		rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
 		if rollbackErr != nil {
