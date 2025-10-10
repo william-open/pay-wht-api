@@ -111,7 +111,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-
+		req.ClientId = clientId
 		// 验证IP是否允许
 		verifyService := service.NewVerifyIpWhitelistService()
 		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
