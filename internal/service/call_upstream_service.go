@@ -65,10 +65,10 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	// ✅ 定义响应结构
 	var response struct {
 		Code utils.StringOrNumber `json:"code"` // 顶层code（无用）
-		Msg  string               `json:"msg"`
+		Msg  utils.FlexibleMsg    `json:"msg"`
 		Data struct {
 			Code      utils.StringOrNumber `json:"code"` // ✅ 实际判断的字段
-			Msg       string               `json:"msg"`
+			Msg       utils.FlexibleMsg    `json:"msg"`
 			UpOrderNo string               `json:"up_order_no"`
 			PayUrl    string               `json:"pay_url"`
 			MOrderId  string               `json:"m_order_id"`
@@ -144,6 +144,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		"notifyUrl":    req.NotifyUrl, // 添加通知URL
 		"submitUrl":    req.SubmitUrl, // 下单URL
 		"queryUrl":     req.QueryUrl,  // 查单URL
+		"clientIp":     req.ClientIp,
 	}
 
 	upstreamUrl := config.C.Upstream.PayoutApiUrl
@@ -167,17 +168,17 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 
 	// ✅ 解析响应
 	var response struct {
-		Code interface{} `json:"code"` // 使用interface{}因为上游可能返回字符串或数字
-		Msg  string      `json:"msg"`
+		Code utils.StringOrNumber `json:"code"` // 使用interface{}因为上游可能返回字符串或数字
+		Msg  utils.FlexibleMsg    `json:"msg"`
 		Data struct {
-			UpOrderNo string `json:"up_order_no"`
-			PayUrl    string `json:"pay_url"`
-			MOrderId  string `json:"m_order_id"`
-			Status    string `json:"status"`   // 代付可能有状态返回
-			Fee       string `json:"fee"`      // 代付手续费
-			TradeNo   string `json:"trade_no"` // 交易号
-			Code      string `json:"code"`     // code编码
-			Msg       string `json:"msg"`      // 上游返回错误信息
+			UpOrderNo string               `json:"up_order_no"`
+			PayUrl    string               `json:"pay_url"`
+			MOrderId  string               `json:"m_order_id"`
+			Status    string               `json:"status"`   // 代付可能有状态返回
+			Fee       string               `json:"fee"`      // 代付手续费
+			TradeNo   string               `json:"trade_no"` // 交易号
+			Code      utils.StringOrNumber `json:"code"`     // code编码
+			Msg       utils.FlexibleMsg    `json:"msg"`      // 上游返回错误信息
 		} `json:"data"`
 	}
 
@@ -187,7 +188,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	}
 
 	// 检查响应码（支持字符串和数字类型）
-	if !isSuccessCode(response.Code) {
+	if !isSuccessCode(string(response.Code)) {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
 		rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
 		if rollbackErr != nil {
@@ -197,7 +198,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	}
 	// ✅ 只认 data.code == "0" 成功
 	log.Printf("[Upstream-Payout]上游供应商返回code: %s", response.Data.Code)
-	if response.Code != "0" || response.Data.Code != "0" {
+	if string(response.Code) != "0" || string(response.Data.Code) != "0" {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
 		rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
 		if rollbackErr != nil {
