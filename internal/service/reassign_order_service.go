@@ -345,7 +345,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 根据接平台银行编码查询平台银行信息
-	platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+	_, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
 	if pbErr != nil {
 		return "", fmt.Errorf(fmt.Sprintf("Bank code does not exist,%s", req.BankCode))
 	}
@@ -353,8 +353,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	// 根据接口ID+平台银行编码+国家货币查询对应上游银行编码+银行名称
 	upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
 	if ubErr != nil {
-		bankCode = platformBank.Code
-		bankName = platformBank.Name
+		return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
 	} else {
 		bankCode = upstreamBank.UpstreamBankCode
 		bankName = upstreamBank.UpstreamBankName

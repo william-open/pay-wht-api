@@ -183,7 +183,6 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		// 先转成 uint64，再强转成 uint
 		payProductId, err := strconv.ParseUint(req.PayProductId, 10, 64)
 		if err != nil {
-			fmt.Println("转换失败:", err)
 			return resp, errors.New("admin test no single channel available,pay_product_id transfer error")
 		}
 		single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, payProductId)
@@ -363,7 +362,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 根据接平台银行编码查询平台银行信息
-	platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+	_, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
 	if pbErr != nil {
 		return "", fmt.Errorf(fmt.Sprintf("Bank code does not exist,%s", req.BankCode))
 	}
@@ -371,8 +370,9 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	// 根据接口ID+平台银行编码+国家货币查询对应上游银行编码+银行名称
 	upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
 	if ubErr != nil {
-		bankCode = platformBank.Code
-		bankName = platformBank.Name
+		return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
+		//bankCode = platformBank.Code
+		//bankName = platformBank.Name
 	} else {
 		bankCode = upstreamBank.UpstreamBankCode
 		bankName = upstreamBank.UpstreamBankName
