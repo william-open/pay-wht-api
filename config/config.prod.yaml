@@ -1,38 +1,96 @@
+# 项目相关配置
+project:
+  # 名称
+  name: wht_pay
+  # 版本
+  version: 0.0.1
+  # 版权年份
+  copyright: 2025
+
 server:
   port: "8080"
   mode: "debug"
 
 mysql_main:
-  host: "127.0.0.1"
+  host: "localhost"
   port: 3306
-  database: "wht_pay"
+  database: "fourth_wht_pay"
   username: "root"
-  password: "root"
+  password: "Lmx@790816"
   charset: "utf8mb4"
   maxIdleConns: 5
   maxOpenConns: 20
 
 mysql_order:
-  host: "127.0.0.1"
+  host: "localhost"
   port: 3306
-  database: "wht_order"
+  database: "fourth_wht_order"
   username: "root"
-  password: "root"
+  password: "Lmx@790816"
   charset: "utf8mb4"
   maxIdleConns: 5
   maxOpenConns: 20
 
 rabbitmq:
-  url: "amqp://guest:guest@127.0.0.1:5672/"
+  host: "127.0.0.1"
+  port: 5672
+  username: "guest"
+  password: "guest"
+  virtual_host: "/"
+  prefetch_count: 100
+
+  producers:
+    - name: "order_stat"
+      exchange: "order.stat.exchange"
+      exchange_type: "direct"
+      routing_key: "order.stat.topic"
+
+    - name: "risk_notify"
+      exchange: "risk.notify.exchange"
+      exchange_type: "topic"
+      routing_key: "risk.alert.high"
+
+    - name: "settlement_trigger"
+      exchange: "settlement.trigger.exchange"
+      exchange_type: "fanout"
+      routing_key: ""
+
+  consumers:
+    - name: "receive"
+      queue: "receive.up.order.notify.queue"
+      exchange: "receive_order_exchange"
+      exchange_type: "direct"
+      routing_key: "receive.order.callback"
+      durable: true
+      auto_delete: false
+      exclusive: false
+      no_wait: false
+
+    - name: "payout"
+      queue: "payout.up.order.notify.queue"
+      exchange: "payout_order_exchange"
+      exchange_type: "direct"
+      routing_key: "payout.order.callback"
+      durable: true
+      auto_delete: false
+      exclusive: false
+      no_wait: false
+
 
 redis:
   addr: "127.0.0.1:6379"
-  password: ""
-  db: 0
+  password: "Lmx@790816"
+  db: 1
 
 security:
-  hmacSecret: "demo_hmac_secret"
+  hmacSecret: "zVBy6YCo"
 
 order:
   shardsPerMonth: 4
   createTimeoutSec: 3
+
+# 上游服务PHP接口地址
+upstream:
+  #  receiveApiUrl: "http://up.test.8dacai.cyou/order/receive"
+  receiveApiUrl: "http://localhost:9501/order/receive"
+  payoutApiUrl: "http://localhost:9501/order/payout"

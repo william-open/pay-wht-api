@@ -17,8 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// PayoutCreateAuth 中间件：验证 代付订单创建 POST JSON 请求签名
-func PayoutCreateAuth() gin.HandlerFunc {
+// ReassignCreateAuth 中间件：验证 代付订单创建 POST JSON 请求签名
+func ReassignCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.Request.Method != http.MethodPost {
 			c.Next()
@@ -43,7 +43,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 		// 解析 JSON
-		var req dto.CreatePayoutOrderReq
+		var req dto.CreateReassignOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			// 判断是否为字段验证错误 validator.ValidationErrors 类型断言，并逐项提取字段名与错误原因
 			var ve validator.ValidationErrors
@@ -125,23 +125,25 @@ func PayoutCreateAuth() gin.HandlerFunc {
 
 		// 提取参数做签名（排除 Sign 字段）
 		params := map[string]string{
-			"version":       req.Version,
-			"merchant_no":   req.MerchantNo,
-			"tran_flow":     req.TranFlow,
-			"tran_datetime": req.TranDatetime,
-			"amount":        req.Amount,
-			"pay_type":      req.PayType,
-			"notify_url":    req.NotifyUrl,
-			"acc_no":        req.AccNo,
-			"acc_name":      req.AccName,
-			"pay_email":     req.PayEmail,
-			"pay_phone":     req.PayPhone,
-			"bank_code":     req.BankCode,
-			"bank_name":     req.BankName,
-			"identity_type": req.IdentityType,
-			"identity_num":  req.IdentityNum,
-			"pay_method":    req.PayMethod,
-			"sign":          req.Sign,
+			"version":        req.Version,
+			"merchant_no":    req.MerchantNo,
+			"tran_flow":      req.TranFlow,
+			"tran_datetime":  req.TranDatetime,
+			"amount":         req.Amount,
+			"pay_type":       req.PayType,
+			"notify_url":     req.NotifyUrl,
+			"acc_no":         req.AccNo,
+			"acc_name":       req.AccName,
+			"pay_email":      req.PayEmail,
+			"pay_phone":      req.PayPhone,
+			"bank_code":      req.BankCode,
+			"bank_name":      req.BankName,
+			"identity_type":  req.IdentityType,
+			"identity_num":   req.IdentityNum,
+			"pay_method":     req.PayMethod,
+			"pay_product_id": req.PayProductId,
+			"order_id":       req.OrderId,
+			"sign":           req.Sign,
 		}
 
 		apiKey := merchant.ApiKey

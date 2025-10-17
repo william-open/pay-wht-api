@@ -77,6 +77,7 @@ func main() {
 		receive := handler.NewReceiveOrderHandler()
 		payout := handler.NewPayoutOrderHandler()
 		account := handler.NewAccountHandler()
+		reassign := handler.NewReassignOrderHandler()
 		// 代收网关
 		v1.POST("/order/receive/create", middleware.ReceiveCreateAuth(), receive.ReceiveOrderCreate)
 		v1.POST("/order/receive/query", middleware.ReceiveQueryAuth(), receive.ReceiveOrderQuery)
@@ -85,6 +86,8 @@ func main() {
 		v1.POST("/order/payout/query", middleware.PayoutQueryAuth(), payout.PayoutOrderQuery)
 		// 查询商户账户信息
 		v1.POST("/query/account/balance", middleware.AccountAuth(), account.Query)
+		// 代付失败改派功能
+		v1.POST("/order/reassign/submit", middleware.ReassignCreateAuth(), reassign.ReassignOrderCreate)
 	}
 
 	addr := ":" + config.C.Server.Port

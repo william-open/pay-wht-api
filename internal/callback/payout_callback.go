@@ -15,8 +15,10 @@ import (
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/event"
 	orderModel "wht-order-api/internal/model/order"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/settlement"
 	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 )
 
@@ -52,6 +54,11 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 
 	// 3) 验证上游IP
 	if !verifyUpstreamWhitelist(upOrder.SupplierId, msg.UpIpAddress) {
+		notifyMsg := fmt.Sprintf("[CALLBACK-PAYOUT] 上游IP不在白名单内, MOrderID=%v, upstreamId=%v, ip=%s",
+			mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
+		// ⚠️ 每次失败后都发 Telegram
+		notify.Notify(system.BotChatID, "warn", "[CALLBACK-PAYOUT]上游IP不在白名单内",
+			notifyMsg, true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 上游IP不在白名单内, MOrderID=%v, upstreamId=%v, ip=%s",
 			mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
 	}
@@ -104,6 +111,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	settlementResult := dto.SettlementResult(order.SettleSnapshot)
 
 	statusText := s.payoutConvertStatus(msg.Status)
+
 	isSuccess := statusText == "SUCCESS"
 
 	if err := settleService.DoPayoutSettlement(settlementResult,
@@ -112,6 +120,9 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		isSuccess,
 		order.Amount,
 	); err != nil {
+		notifyMsg := fmt.Sprintf("结算失败 OrderID=%v, err=%w", order.OrderID, err)
+		notify.Notify(system.BotChatID, "warn", "[CALLBACK-PAYOUT]",
+			notifyMsg, true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 结算失败 OrderID=%v, err=%w", order.OrderID, err)
 	}
 
@@ -141,7 +152,14 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 			}
 		}()
 	}
-
+	//代付订单失败不直接给商户推送消息
+	if statusText == "FAIL" {
+		notifyMsg := fmt.Sprintf("⚠️ [CALLBACK-PAYOUT] 订单代付失败，不自动进行商户推送，进入人工流程,,OrderID=%v, status=%s", order.OrderID, statusText)
+		log.Printf(notifyMsg)
+		notify.Notify(system.BotChatID, "warn", "[CALLBACK-PAYOUT]",
+			notifyMsg, true)
+		return nil
+	}
 	// 9) 通知商户
 	payload := dto.PayoutNotifyMerchantPayload{
 		TranFlow:    order.MOrderID,
