@@ -159,25 +159,19 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		return resp, errors.New("amount invalid")
 	}
 
-	// 4 商户余额
-	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
-	if mmErr != nil || merchantMoney.Money.LessThan(amount) {
-		return resp, errors.New("insufficient balance")
-	}
-
-	// 5 系统通道
+	// 4 系统通道
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
 		return resp, errors.New("channel invalid")
 	}
 
-	// 6 商户通道
+	// 5 商户通道
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
 		return resp, errors.New(fmt.Sprintf("merchant channel invalid,payType: %s", req.PayType))
 	}
 
-	// 7 选择通道
+	// 6 选择通道
 	var products []dto.PayProductVo
 	if req.PayProductId != "" { // 管理后台测试用
 		// 先转成 uint64，再强转成 uint
@@ -215,7 +209,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		}
 	}
 
-	// 8 幂等检查
+	// 7 幂等检查
 	oid, exists, err := s.checkIdempotency(merchant.MerchantID, req.TranFlow)
 	if err != nil {
 		return resp, err
@@ -224,12 +218,17 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		return resp, nil
 	}
 
-	// 9 计算结算
+	// 8 计算结算
 	settle, err := s.calculateSettlement(merchant, products[0], amount)
 	if err != nil {
 		return resp, err
 	}
 
+	// 9 商户余额
+	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
+	if mmErr != nil || merchantMoney.Money.LessThan(amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)) {
+		return resp, errors.New("merchant insufficient balance")
+	}
 	// 10 创建订单
 	now := time.Now()
 	order, tx, err := s.createOrderAndTransaction(merchant, req, products[0], amount, oid, now, settle)
@@ -466,7 +465,8 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 			return fmt.Errorf("create order index failed: %w", err)
 		}
 		// 冻结商户资金
-		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), amount, merchant.NickName)
+		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
+		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), needFreezeAmount, merchant.NickName)
 		if freezeErr != nil {
 			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
 		}

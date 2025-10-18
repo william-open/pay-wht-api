@@ -76,8 +76,8 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, status bool, orderAmount decimal.Decimal) error {
 	orderNo := strconv.FormatUint(orderId, 10)
 
-	log.Printf("[SETTLEMENT] 开始代付结算: 商户=%v, 订单号=%v, 金额=%v %s, 状态=%v, 数据=%+v",
-		mId, orderNo, req.MerchantRecv, req.Currency, status, req)
+	log.Printf("[SETTLEMENT] 开始代付结算: 商户=%v, 订单号=%v, 商户费用=%v,代理佣金=%v,货币=%s, 状态=%v, 数据=%+v",
+		mId, orderNo, req.MerchantTotalFee, req.AgentTotalFee, req.Currency, status, req)
 
 	// 1) 校验商户合法性
 	merchant, err := s.mainDao.GetMerchantId(mId)
@@ -89,17 +89,18 @@ func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, or
 	}
 
 	// 2) 商户资金日志 & 账户更新
-	if err := s.mainDao.HandlePayoutCallback(
+	if handleErr := s.mainDao.HandlePayoutCallback(
 		merchant.MerchantID,
 		req.Currency,
 		orderNo,
-		req.MerchantRecv,
+		req.MerchantTotalFee,
+		req.AgentTotalFee,
 		status,
 		orderAmount,
 		merchant.NickName,
-	); err != nil {
-		return fmt.Errorf("[SETTLEMENT] 商户资金结算失败, merchantID=%v, orderNo=%v, 金额=%v, err=%w",
-			merchant.MerchantID, orderNo, req.MerchantRecv, err)
+	); handleErr != nil {
+		return fmt.Errorf("[SETTLEMENT][payout] 商户资金结算失败, merchantID=%v, orderNo=%v, 商户手续费金额=%v,代理手续费金额=%v, err=%w",
+			merchant.MerchantID, orderNo, req.MerchantTotalFee, req.AgentTotalFee, handleErr)
 	}
 
 	// 3) 成功时才处理代理收益

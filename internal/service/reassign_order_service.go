@@ -155,28 +155,22 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 	// 3 金额
 	amount, err := decimal.NewFromString(strings.TrimSpace(req.Amount))
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
-		return resp, errors.New("amount invalid")
+		return resp, errors.New("order amount invalid")
 	}
 
-	// 4 商户余额
-	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
-	if mmErr != nil || merchantMoney.Money.LessThan(amount) {
-		return resp, errors.New("insufficient balance")
-	}
-
-	// 5 系统通道
+	// 4 系统通道
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
-		return resp, errors.New("channel invalid")
+		return resp, errors.New("system channel invalid")
 	}
 
-	// 6 商户通道
+	// 5 商户通道
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
 		return resp, errors.New(fmt.Sprintf("merchant channel invalid,payType: %s", req.PayType))
 	}
 
-	// 7 选择通道
+	// 6 选择通道
 	var products []dto.PayProductVo
 	if req.PayProductId == "" { // 指定上游通道下单
 		return resp, errors.New(fmt.Sprintf("merchant specify upstream channel empty,payType: %s", req.PayType))
@@ -204,7 +198,8 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 	if req.OrderId == "" {
 		return resp, errors.New("reassign order failed,orderId is empty")
 	}
-	// 8 幂等检查
+
+	// 7 幂等检查
 	_, exists, err := s.checkIdempotency(merchant.MerchantID, req.TranFlow, orderId)
 	if err != nil {
 		return resp, err
@@ -213,9 +208,19 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 		return resp, nil
 	}
 
+	// 8 计算结算
+	settle, err := s.calculateSettlement(merchant, products[0], amount)
+	if err != nil {
+		return resp, err
+	}
+	// 9 商户余额
+	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
+	if mmErr != nil || merchantMoney.Money.LessThan(amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)) {
+		return resp, errors.New("merchant insufficient balance")
+	}
 	// 10 创建订单
 	now := time.Now()
-	order, tx, err := s.createTransaction(merchant, req, products[0], amount, orderId, now)
+	order, tx, err := s.createTransaction(merchant, req, products[0], amount, orderId, now, settle)
 	if err != nil {
 		return resp, err
 	}
@@ -421,6 +426,7 @@ func (s *ReassignOrderService) createTransaction(
 	amount decimal.Decimal,
 	oid uint64,
 	now time.Time,
+	settle dto.SettlementResult,
 ) (*ordermodel.MerchantPayOutOrderM, *ordermodel.PayoutUpstreamTxM, error) {
 	log.Printf(">>创建订单: %v", oid)
 	var order *ordermodel.MerchantPayOutOrderM
@@ -437,7 +443,8 @@ func (s *ReassignOrderService) createTransaction(
 		}
 		tx = upTx
 		// 冻结商户资金
-		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), amount, merchant.NickName)
+		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
+		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), needFreezeAmount, merchant.NickName)
 		if freezeErr != nil {
 			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
 		}
@@ -455,6 +462,20 @@ func (s *ReassignOrderService) createTransaction(
 	}
 	if order == nil {
 		return nil, nil, errors.New("order not found after creation")
+	}
+	var orderSettle dto.SettlementResult
+	if err := copier.Copy(&orderSettle, &settle); err != nil {
+		return nil, nil, fmt.Errorf("copy settlement failed: %w", err)
+	}
+
+	updateErr := s.orderDao.UpdateByWhere(orderTable, map[string]interface{}{
+		"order_id": oid,
+	}, map[string]interface{}{
+		"settle_snapshot": ordermodel.PayoutSettleSnapshot(orderSettle),
+	})
+
+	if updateErr != nil {
+		return nil, nil, fmt.Errorf(" reassign order update  order setttle failed: %w", err)
 	}
 
 	txTable := shard.UpOutOrderShard.GetTable(tx.UpOrderId, now)

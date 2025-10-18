@@ -49,6 +49,13 @@ func (r *PayoutOrderDao) Insert(table string, o *ordermodel.MerchantPayOutOrderM
 	return r.DB.Table(table).Create(o).Error
 }
 
+func (r *PayoutOrderDao) UpdateByWhere(table string, where map[string]interface{}, data map[string]interface{}) error {
+	if err := r.checkDB(); err != nil {
+		return fmt.Errorf("update payout order failed: %w", err)
+	}
+	return r.DB.Table(table).Where(where).Updates(data).Error
+}
+
 func (r *PayoutOrderDao) GetByID(table string, id uint64) (*ordermodel.MerchantPayOutOrderM, error) {
 	if err := r.checkDB(); err != nil {
 		return nil, fmt.Errorf("get by id failed: %w", err)
@@ -134,7 +141,7 @@ func (r *PayoutOrderDao) UpdateUpTx(table string, o dto.UpdateUpTxVo) error {
 // 更新代付订单表
 func (r *PayoutOrderDao) UpdateOrder(table string, o dto.UpdateOrderVo) error {
 	if err := r.checkDB(); err != nil {
-		return fmt.Errorf("update order failed: %w", err)
+		return fmt.Errorf("update payout order failed: %w", err)
 	}
 	return r.DB.Table(table).Where("order_id = ?", o.OrderId).Updates(o).Error
 }
