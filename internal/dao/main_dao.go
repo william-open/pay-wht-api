@@ -282,13 +282,15 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 
 // HandlePayoutCallback 处理代付回调资金逻辑
 // status = true 表示代付成功；false 表示代付失败（解冻回余额）
-func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, amount decimal.Decimal, status bool, orderAmount decimal.Decimal, operator string) error {
+func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, merchantFees decimal.Decimal, agentFees decimal.Decimal, status bool, orderAmount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("handle payout callback failed: %w", err)
 	}
-	if amount.LessThanOrEqual(decimal.Zero) {
-		return fmt.Errorf("invalid amount: %s", amount.String())
-	}
+	//if amount.LessThanOrEqual(decimal.Zero) {
+	//	return fmt.Errorf("invalid amount: %s", amount.String())
+	//}
+	//订单原始费用+商户手续费+代理手续费
+	orderAmount = orderAmount.Add(agentFees).Add(merchantFees)
 
 	return d.DB.Transaction(func(tx *gorm.DB) error {
 		// 获取商户账户

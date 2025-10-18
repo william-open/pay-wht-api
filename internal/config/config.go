@@ -92,6 +92,7 @@ var C Root
 
 func Init() {
 	env := flag.String("env", "dev", "config env: dev|prod")
+	log.Printf("启动环境: %+v", *env)
 	flag.Parse()
 
 	v := viper.New()

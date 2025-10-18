@@ -29,10 +29,9 @@ import (
 	ordermodel "wht-order-api/internal/model/order"
 )
 
-// ================== Redis 失败计数 ==================
-const payoutUpstreamFailKey = "payout_up_fail:"
+const reassignUpstreamFailKey = "reassign_up_fail:"
 
-type PayoutOrderService struct {
+type ReassignOrderService struct {
 	mainDao         *dao.MainDao
 	orderDao        *dao.PayoutOrderDao
 	indexTableDao   *dao.IndexTableDao
@@ -46,9 +45,9 @@ type PayoutOrderService struct {
 	isHealthy       bool
 }
 
-func NewPayoutOrderService() *PayoutOrderService {
+func NewReassignOrderService() *ReassignOrderService {
 	ctx, cancel := context.WithCancel(context.Background())
-	service := &PayoutOrderService{
+	service := &ReassignOrderService{
 		mainDao:       dao.NewMainDao(),        // 使用工厂方法
 		orderDao:      dao.NewPayoutOrderDao(), // 使用工厂方法
 		indexTableDao: dao.NewIndexTableDao(),  // 使用工厂方法
@@ -60,21 +59,21 @@ func NewPayoutOrderService() *PayoutOrderService {
 	// 初始化时进行健康检查
 	if service.HealthCheck() {
 		service.isHealthy = true
-		log.Println("PayoutOrderService 初始化成功")
+		log.Println("ReassignOrderService 初始化成功")
 	} else {
-		log.Println("PayoutOrderService 初始化警告：健康检查未通过")
+		log.Println("ReassignOrderService 初始化警告：健康检查未通过")
 	}
 
 	return service
 }
 
-func (s *PayoutOrderService) Shutdown() {
+func (s *ReassignOrderService) Shutdown() {
 	s.cancel()
 }
 
 // ================== 上游失败监控 ==================
-func (s *PayoutOrderService) recordUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+func (s *ReassignOrderService) recordUpstreamFail(upstreamID uint64) {
+	key := fmt.Sprintf("%s%d", reassignUpstreamFailKey, upstreamID)
 	cnt, _ := dal.RedisClient.Incr(dal.RedisCtx, key).Result()
 	if cnt == 1 {
 		dal.RedisClient.Expire(dal.RedisCtx, key, 5*time.Minute)
@@ -89,13 +88,13 @@ func (s *PayoutOrderService) recordUpstreamFail(upstreamID uint64) {
 	}
 }
 
-func (s *PayoutOrderService) clearUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+func (s *ReassignOrderService) clearUpstreamFail(upstreamID uint64) {
+	key := fmt.Sprintf("%s%d", reassignUpstreamFailKey, upstreamID)
 	dal.RedisClient.Del(dal.RedisCtx, key)
 }
 
-func (s *PayoutOrderService) getUpstreamFailCount(upstreamID uint64) int {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+func (s *ReassignOrderService) getUpstreamFailCount(upstreamID uint64) int {
+	key := fmt.Sprintf("%s%d", reassignUpstreamFailKey, upstreamID)
 	val, _ := dal.RedisClient.Get(dal.RedisCtx, key).Result()
 	if val == "" {
 		return 0
@@ -105,7 +104,7 @@ func (s *PayoutOrderService) getUpstreamFailCount(upstreamID uint64) int {
 }
 
 // ================== 轮询通道选择 ==================
-func (s *PayoutOrderService) selectPollingChannels(
+func (s *ReassignOrderService) selectPollingChannels(
 	merchantID uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal,
 ) ([]dto.PayProductVo, error) {
 	products, err := s.mainDao.GetAvailablePollingPayProducts(merchantID, sysChannelCode, currency, channelType)
@@ -125,12 +124,12 @@ func (s *PayoutOrderService) selectPollingChannels(
 }
 
 // Create 处理代付订单下单业务逻辑（增加了防 panic、判空、日志与堆栈打印）
-func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.CreatePayoutOrderResp, err error) {
+func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.CreateReassignOrderResp, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[PANIC] Payout Create panic: %v\n%s", r, debug.Stack())
-			notify.Notify(system.BotChatID, "error", "代付Panic", fmt.Sprintf("panic: %v", r), true)
-			resp = dto.CreatePayoutOrderResp{
+			log.Printf("[PANIC] reassign order Create panic: %v\n%s", r, debug.Stack())
+			notify.Notify(system.BotChatID, "error", "代付改派Panic", fmt.Sprintf("panic: %v", r), true)
+			resp = dto.CreateReassignOrderResp{
 				PaySerialNo: "", TranFlow: req.TranFlow, SysTime: time.Now().Format(time.RFC3339),
 				Amount: req.Amount, Code: "999",
 			}
@@ -143,7 +142,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	}
 
 	// 1 参数验证
-	if err := validateCreatePayoutRequest(req); err != nil {
+	if err := validateCreateReassignRequest(req); err != nil {
 		return resp, err
 	}
 
@@ -156,13 +155,13 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	// 3 金额
 	amount, err := decimal.NewFromString(strings.TrimSpace(req.Amount))
 	if err != nil || amount.LessThanOrEqual(decimal.Zero) {
-		return resp, errors.New("amount invalid")
+		return resp, errors.New("order amount invalid")
 	}
 
 	// 4 系统通道
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
-		return resp, errors.New("channel invalid")
+		return resp, errors.New("system channel invalid")
 	}
 
 	// 5 商户通道
@@ -173,48 +172,39 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 
 	// 6 选择通道
 	var products []dto.PayProductVo
-	if req.PayProductId != "" { // 管理后台测试用
-		// 先转成 uint64，再强转成 uint
-		payProductId, err := strconv.ParseUint(req.PayProductId, 10, 64)
-		if err != nil {
-			return resp, errors.New("admin test no single channel available,pay_product_id transfer error")
-		}
-		single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, payProductId)
-		if err != nil {
-			return resp, errors.New("admin test no single channel available")
-		}
-		// 检查金额是否在通道允许范围内
-		orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
-		if !utils.MatchOrderRange(amount, orderRange) {
-			return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
-		}
-		products = []dto.PayProductVo{single}
-	} else {
-		if merchantChannelInfo.DispatchMode == 2 {
-			single, err := s.SelectSingleChannel(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency)
-			if err != nil {
-				return resp, errors.New("no single channel available")
-			}
-			// 检查金额是否在通道允许范围内
-			orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
-			if !utils.MatchOrderRange(amount, orderRange) {
-				return resp, errors.New(fmt.Sprintf("the amount does not meet the risk control requirements.order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
-			}
-			products = []dto.PayProductVo{single}
-		} else {
-			products, err = s.selectPollingChannels(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, amount)
-			if err != nil {
-				return resp, err
-			}
-		}
+	if req.PayProductId == "" { // 指定上游通道下单
+		return resp, errors.New(fmt.Sprintf("merchant specify upstream channel empty,payType: %s", req.PayType))
+	}
+	// 先转成 uint64，再强转成 uint
+	payProductId, err := strconv.ParseUint(req.PayProductId, 10, 64)
+	if err != nil {
+		return resp, errors.New("admin reassign no single channel available,pay_product_id transfer error")
+	}
+	single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, payProductId)
+	if err != nil {
+		return resp, errors.New("admin test no single channel available")
+	}
+	// 检查金额是否在通道允许范围内
+	orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
+	if !utils.MatchOrderRange(amount, orderRange) {
+		return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
+	}
+	products = []dto.PayProductVo{single}
+	orderId, err := strconv.ParseUint(req.OrderId, 10, 64)
+	if err != nil {
+		fmt.Println("转换失败:", err)
+		return resp, err
+	}
+	if req.OrderId == "" {
+		return resp, errors.New("reassign order failed,orderId is empty")
 	}
 
 	// 7 幂等检查
-	oid, exists, err := s.checkIdempotency(merchant.MerchantID, req.TranFlow)
+	_, exists, err := s.checkIdempotency(merchant.MerchantID, req.TranFlow, orderId)
 	if err != nil {
 		return resp, err
 	}
-	if exists {
+	if !exists {
 		return resp, nil
 	}
 
@@ -223,7 +213,6 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	if err != nil {
 		return resp, err
 	}
-
 	// 9 商户余额
 	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
 	if mmErr != nil || merchantMoney.Money.LessThan(amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)) {
@@ -231,7 +220,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	}
 	// 10 创建订单
 	now := time.Now()
-	order, tx, err := s.createOrderAndTransaction(merchant, req, products[0], amount, oid, now, settle)
+	order, tx, err := s.createTransaction(merchant, req, products[0], amount, orderId, now, settle)
 	if err != nil {
 		return resp, err
 	}
@@ -279,8 +268,8 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	}
 
 	if lastErr != nil {
-		resp = dto.CreatePayoutOrderResp{
-			PaySerialNo: strconv.FormatUint(oid, 10),
+		resp = dto.CreateReassignOrderResp{
+			PaySerialNo: strconv.FormatUint(orderId, 10),
 			TranFlow:    req.TranFlow, SysTime: time.Now().Format(time.RFC3339),
 			Amount: req.Amount, Code: "001",
 		}
@@ -288,20 +277,20 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	}
 
 	// 12 构建响应
-	resp = dto.CreatePayoutOrderResp{
-		PaySerialNo: strconv.FormatUint(oid, 10),
+	resp = dto.CreateReassignOrderResp{
+		PaySerialNo: strconv.FormatUint(orderId, 10),
 		TranFlow:    req.TranFlow,
 		SysTime:     strconv.FormatInt(utils.GetTimestampMs(), 10),
 		Amount:      req.Amount, Code: "0", Status: "0001",
 	}
 
 	// 13 异步事件
-	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
+	go s.asyncPostOrderCreation(orderId, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 	return resp, nil
 }
 
 // asyncPostOrderCreation 异步处理订单创建后的操作
-func (s *PayoutOrderService) asyncPostOrderCreation(oid uint64, order *ordermodel.MerchantPayOutOrderM, merchantID uint64, tranFlow, amount string, now time.Time) {
+func (s *ReassignOrderService) asyncPostOrderCreation(oid uint64, order *ordermodel.MerchantPayOutOrderM, merchantID uint64, tranFlow, amount string, now time.Time) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[PANIC] asyncPostOrderCreation recovered: %v\n stack: %s", r, debug.Stack())
@@ -309,7 +298,7 @@ func (s *PayoutOrderService) asyncPostOrderCreation(oid uint64, order *ordermode
 	}()
 
 	// 缓存到 Redis
-	cacheKey := "payout_order:" + strconv.FormatUint(oid, 10)
+	cacheKey := "payout_reassign_order:" + strconv.FormatUint(oid, 10)
 	orderJSON := utils.MapToJSON(order)
 	if orderJSON == "" {
 		log.Printf("订单JSON序列化失败: oid=%d", oid)
@@ -322,9 +311,9 @@ func (s *PayoutOrderService) asyncPostOrderCreation(oid uint64, order *ordermode
 }
 
 // callUpstreamService 调用上游服务（带防重保护）
-func (s *PayoutOrderService) callUpstreamService(
+func (s *ReassignOrderService) callUpstreamService(
 	merchant *mainmodel.Merchant,
-	req *dto.CreatePayoutOrderReq,
+	req *dto.CreateReassignOrderReq,
 	payChannelProduct *dto.PayProductVo,
 	txId uint64,
 	order *ordermodel.MerchantPayOutOrderM,
@@ -353,9 +342,9 @@ func (s *PayoutOrderService) callUpstreamService(
 }
 
 // callUpstreamServiceInternal 调用上游服务内部实现
-func (s *PayoutOrderService) callUpstreamServiceInternal(
+func (s *ReassignOrderService) callUpstreamServiceInternal(
 	merchant *mainmodel.Merchant,
-	req *dto.CreatePayoutOrderReq,
+	req *dto.CreateReassignOrderReq,
 	payChannelProduct *dto.PayProductVo,
 	txId uint64,
 	order *ordermodel.MerchantPayOutOrderM,
@@ -370,8 +359,6 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
 	if ubErr != nil {
 		return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
-		//bankCode = platformBank.Code
-		//bankName = platformBank.Name
 	} else {
 		bankCode = upstreamBank.UpstreamBankCode
 		bankName = upstreamBank.UpstreamBankName
@@ -431,16 +418,17 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	return upOrderNo, nil
 }
 
-// createOrderAndTransaction 创建订单和事务
-func (s *PayoutOrderService) createOrderAndTransaction(
+// createTransaction 创建订单和事务
+func (s *ReassignOrderService) createTransaction(
 	merchant *mainmodel.Merchant,
-	req dto.CreatePayoutOrderReq,
+	req dto.CreateReassignOrderReq,
 	payChannelProduct dto.PayProductVo,
 	amount decimal.Decimal,
 	oid uint64,
 	now time.Time,
 	settle dto.SettlementResult,
 ) (*ordermodel.MerchantPayOutOrderM, *ordermodel.PayoutUpstreamTxM, error) {
+	log.Printf(">>创建订单: %v", oid)
 	var order *ordermodel.MerchantPayOutOrderM
 	var tx *ordermodel.PayoutUpstreamTxM
 
@@ -448,22 +436,12 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 		// 事务内的 dao
 		orderDao := dao.NewPayoutOrderDaoWithDB(txDB)
 
-		// 创建订单
-		if err := s.createOrder(merchant, req, payChannelProduct, amount, oid, now, settle, orderDao); err != nil {
-			return fmt.Errorf("create order failed: %w", err)
-		}
-
 		// 创建上游事务
 		upTx, err := s.createUpstreamTx(merchant, req, payChannelProduct, oid, now, orderDao)
 		if err != nil {
 			return fmt.Errorf("create upstream transaction failed: %w", err)
 		}
 		tx = upTx
-
-		// 创建索引
-		if err := s.createOrderIndex(merchant, req, oid, now, orderDao); err != nil {
-			return fmt.Errorf("create order index failed: %w", err)
-		}
 		// 冻结商户资金
 		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
 		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), needFreezeAmount, merchant.NickName)
@@ -485,6 +463,20 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 	if order == nil {
 		return nil, nil, errors.New("order not found after creation")
 	}
+	var orderSettle dto.SettlementResult
+	if err := copier.Copy(&orderSettle, &settle); err != nil {
+		return nil, nil, fmt.Errorf("copy settlement failed: %w", err)
+	}
+
+	updateErr := s.orderDao.UpdateByWhere(orderTable, map[string]interface{}{
+		"order_id": oid,
+	}, map[string]interface{}{
+		"settle_snapshot": ordermodel.PayoutSettleSnapshot(orderSettle),
+	})
+
+	if updateErr != nil {
+		return nil, nil, fmt.Errorf(" reassign order update  order setttle failed: %w", err)
+	}
 
 	txTable := shard.UpOutOrderShard.GetTable(tx.UpOrderId, now)
 	tx, err = s.orderDao.GetTxByOrderId(txTable, oid)
@@ -499,7 +491,7 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 }
 
 // 冻结资金
-func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo string, amount decimal.Decimal, operator string) error {
+func (s *ReassignOrderService) freezePayout(uid uint64, currency string, orderNo string, amount decimal.Decimal, operator string) error {
 
 	err := s.mainDao.FreezePayout(uid, currency, orderNo, amount, operator)
 	if err != nil {
@@ -509,7 +501,7 @@ func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo s
 }
 
 // createOrder 创建订单
-func (s *PayoutOrderService) createOrder(
+func (s *ReassignOrderService) createOrder(
 	merchant *mainmodel.Merchant,
 	req dto.CreatePayoutOrderReq,
 	payChannelProduct dto.PayProductVo,
@@ -580,7 +572,7 @@ func (s *PayoutOrderService) createOrder(
 }
 
 // calculateSettlement 计算结算费用
-func (s *PayoutOrderService) calculateSettlement(merchant *mainmodel.Merchant, payChannelProduct dto.PayProductVo, amount decimal.Decimal) (dto.SettlementResult, error) {
+func (s *ReassignOrderService) calculateSettlement(merchant *mainmodel.Merchant, payChannelProduct dto.PayProductVo, amount decimal.Decimal) (dto.SettlementResult, error) {
 	// 验证输入参数
 	if merchant == nil {
 		return dto.SettlementResult{}, errors.New("merchant cannot be nil")
@@ -632,9 +624,9 @@ func (s *PayoutOrderService) calculateSettlement(merchant *mainmodel.Merchant, p
 }
 
 // createUpstreamTx 创建上游事务
-func (s *PayoutOrderService) createUpstreamTx(
+func (s *ReassignOrderService) createUpstreamTx(
 	merchant *mainmodel.Merchant,
-	req dto.CreatePayoutOrderReq,
+	req dto.CreateReassignOrderReq,
 	payChannelProduct dto.PayProductVo,
 	oid uint64,
 	now time.Time,
@@ -674,7 +666,7 @@ func (s *PayoutOrderService) createUpstreamTx(
 }
 
 // createOrderIndex 创建订单索引
-func (s *PayoutOrderService) createOrderIndex(
+func (s *ReassignOrderService) createOrderIndex(
 	merchant *mainmodel.Merchant,
 	req dto.CreatePayoutOrderReq,
 	oid uint64,
@@ -702,8 +694,9 @@ func (s *PayoutOrderService) createOrderIndex(
 }
 
 // checkIdempotency 检查幂等性
-func (s *PayoutOrderService) checkIdempotency(merchantID uint64, tranFlow string) (uint64, bool, error) {
-	oid := idgen.New()
+func (s *ReassignOrderService) checkIdempotency(merchantID uint64, tranFlow string, orderId uint64) (uint64, bool, error) {
+	log.Printf("改派订单号:%v", orderId)
+	oid := orderId
 	table := shard.OutOrderShard.GetTable(oid, time.Now())
 
 	// 检查是否已存在订单
@@ -719,7 +712,7 @@ func (s *PayoutOrderService) checkIdempotency(merchantID uint64, tranFlow string
 }
 
 // getSysChannelWithCache 获取系统通道信息（带缓存）
-func (s *PayoutOrderService) getSysChannelWithCache(channelCode string) (*dto.PayWayVo, error) {
+func (s *ReassignOrderService) getSysChannelWithCache(channelCode string) (*dto.PayWayVo, error) {
 	key := "sys_channel:" + channelCode
 
 	result, err, _ := s.channelGroup.Do(key, func() (interface{}, error) {
@@ -763,7 +756,7 @@ func (s *PayoutOrderService) getSysChannelWithCache(channelCode string) (*dto.Pa
 }
 
 // getMerchantWithCache 获取商户信息（带缓存和防击穿）
-func (s *PayoutOrderService) getMerchantWithCache(merchantNo string) (*mainmodel.Merchant, error) {
+func (s *ReassignOrderService) getMerchantWithCache(merchantNo string) (*mainmodel.Merchant, error) {
 	key := "merchant:" + merchantNo
 
 	// 使用singleflight防止缓存击穿
@@ -807,8 +800,8 @@ func (s *PayoutOrderService) getMerchantWithCache(merchantNo string) (*mainmodel
 	return result.(*mainmodel.Merchant), nil
 }
 
-// validateCreatePayoutRequest 验证创建订单请求
-func validateCreatePayoutRequest(req dto.CreatePayoutOrderReq) error {
+// validateCreateReassignRequest 验证创建订单请求
+func validateCreateReassignRequest(req dto.CreateReassignOrderReq) error {
 	if req.MerchantNo == "" {
 		return errors.New("merchantNo is required")
 	}
@@ -824,7 +817,7 @@ func validateCreatePayoutRequest(req dto.CreatePayoutOrderReq) error {
 	return nil
 }
 
-func (s *PayoutOrderService) Get(param dto.QueryPayoutOrderReq) (dto.QueryPayoutOrderResp, error) {
+func (s *ReassignOrderService) Get(param dto.QueryPayoutOrderReq) (dto.QueryPayoutOrderResp, error) {
 	var resp dto.QueryPayoutOrderResp
 
 	indexTable := utils.GetOrderIndexTable("p_out_order_index", time.Now())
@@ -860,7 +853,7 @@ func (s *PayoutOrderService) Get(param dto.QueryPayoutOrderReq) (dto.QueryPayout
 }
 
 // TestSelectSingleChannel 查询单独支付通道
-func (s *PayoutOrderService) TestSelectSingleChannel(mId uint, sysChannelCode string, channelType int8, currency string, payProductId uint64) (dto.PayProductVo, error) {
+func (s *ReassignOrderService) TestSelectSingleChannel(mId uint, sysChannelCode string, channelType int8, currency string, payProductId uint64) (dto.PayProductVo, error) {
 	// 查询单独支付通道产品
 	payDetail, err := s.mainDao.GetTestSinglePayChannel(mId, sysChannelCode, channelType, currency, payProductId)
 
@@ -872,7 +865,7 @@ func (s *PayoutOrderService) TestSelectSingleChannel(mId uint, sysChannelCode st
 }
 
 // SelectSingleChannel 查询单独支付通道
-func (s *PayoutOrderService) SelectSingleChannel(mId uint, sysChannelCode string, channelType int8, currency string) (dto.PayProductVo, error) {
+func (s *ReassignOrderService) SelectSingleChannel(mId uint, sysChannelCode string, channelType int8, currency string) (dto.PayProductVo, error) {
 	// 查询单独支付通道产品
 	payDetail, err := s.mainDao.GetSinglePayChannel(mId, sysChannelCode, channelType, currency)
 
@@ -884,7 +877,7 @@ func (s *PayoutOrderService) SelectSingleChannel(mId uint, sysChannelCode string
 }
 
 // getHealthManager 获取通道健康管理器
-func (s *PayoutOrderService) getHealthManager() *health.ChannelHealthManager {
+func (s *ReassignOrderService) getHealthManager() *health.ChannelHealthManager {
 	return &health.ChannelHealthManager{
 		Redis:     dal.RedisClient,
 		Strategy:  &health.DecayStrategy{Factor: 0.95},
@@ -894,7 +887,7 @@ func (s *PayoutOrderService) getHealthManager() *health.ChannelHealthManager {
 }
 
 // selectPollingChannelWithRetry 带重试的轮询通道选择
-func (s *PayoutOrderService) selectPollingChannelWithRetry(mId uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal) (dto.PayProductVo, error) {
+func (s *ReassignOrderService) selectPollingChannelWithRetry(mId uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal) (dto.PayProductVo, error) {
 	// 获取健康管理器
 	healthManager := s.getHealthManager()
 
@@ -937,7 +930,7 @@ func (s *PayoutOrderService) selectPollingChannelWithRetry(mId uint, sysChannelC
 }
 
 // SelectPollingChannel 查询轮询所有支付通道
-func (s *PayoutOrderService) SelectPollingChannel(mId uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal) ([]dto.PayProductVo, error) {
+func (s *ReassignOrderService) SelectPollingChannel(mId uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal) ([]dto.PayProductVo, error) {
 	// 查询所有可用通道产品（状态开启），按 weight 降序
 	products, err := s.mainDao.GetAvailablePollingPayProducts(mId, sysChannelCode, currency, channelType)
 	if err != nil {
@@ -978,7 +971,7 @@ func (s *PayoutOrderService) SelectPollingChannel(mId uint, sysChannelCode strin
 }
 
 // SelectPaymentChannel 根据商户和订单金额选择可用通道（返回指针，调用方需判空）
-func (s *PayoutOrderService) SelectPaymentChannel(merchantID uint, amount decimal.Decimal, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
+func (s *ReassignOrderService) SelectPaymentChannel(merchantID uint, amount decimal.Decimal, channelCode string, currency string) (*dto.PaymentChannelVo, error) {
 	mainDao := &dao.MainDao{}
 	payRouteList, err := mainDao.SelectPaymentChannel(merchantID, channelCode, currency)
 	if err != nil {
@@ -1000,7 +993,7 @@ func (s *PayoutOrderService) SelectPaymentChannel(merchantID uint, amount decima
 }
 
 // QuerySysChannel 查询系统通道编码（返回指针）
-func (s *PayoutOrderService) QuerySysChannel(channelCode string) (*dto.PayWayVo, error) {
+func (s *ReassignOrderService) QuerySysChannel(channelCode string) (*dto.PayWayVo, error) {
 	mainDao := &dao.MainDao{}
 	payWayDetail, err := mainDao.GetSysChannel(channelCode)
 	if err != nil {
@@ -1012,7 +1005,7 @@ func (s *PayoutOrderService) QuerySysChannel(channelCode string) (*dto.PayWayVo,
 	return payWayDetail, nil
 }
 
-func (s *PayoutOrderService) GetMerchantInfo(appId string) (uint64, error) {
+func (s *ReassignOrderService) GetMerchantInfo(appId string) (uint64, error) {
 	merchant, err := s.mainDao.GetMerchant(appId)
 	if err != nil {
 		return 0, fmt.Errorf("get merchant failed: %w", err)
@@ -1024,7 +1017,7 @@ func (s *PayoutOrderService) GetMerchantInfo(appId string) (uint64, error) {
 }
 
 // HealthCheck 服务健康检查
-func (s *PayoutOrderService) HealthCheck() bool {
+func (s *ReassignOrderService) HealthCheck() bool {
 	s.healthCheckLock.Lock()
 	defer s.healthCheckLock.Unlock()
 
@@ -1057,20 +1050,20 @@ func (s *PayoutOrderService) HealthCheck() bool {
 }
 
 // IsHealthy 返回服务健康状态
-func (s *PayoutOrderService) IsHealthy() bool {
+func (s *ReassignOrderService) IsHealthy() bool {
 	s.healthCheckLock.RLock()
 	defer s.healthCheckLock.RUnlock()
 	return s.isHealthy
 }
 
-// InitializePayoutService 初始化支付服务
-func InitializePayoutService() (*PayoutOrderService, error) {
-	service := NewPayoutOrderService()
+// InitializeReassignOrderService 初始化支付服务
+func InitializeReassignOrderService() (*ReassignOrderService, error) {
+	service := NewReassignOrderService()
 
 	if !service.IsHealthy() {
 		return nil, errors.New("service health check failed")
 	}
 
-	log.Println("PayoutOrderService 初始化成功")
+	log.Println("ReassignOrderService 初始化成功")
 	return service, nil
 }
