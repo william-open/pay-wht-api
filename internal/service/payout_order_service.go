@@ -529,6 +529,7 @@ func (s *PayoutOrderService) createOrder(
 	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
 	profitFee := orderFee.Sub(costFee)
+	orderFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
 	m := &ordermodel.MerchantPayOutOrderM{
 		OrderID:        oid,
 		MID:            merchant.MerchantID,
@@ -562,6 +563,7 @@ func (s *PayoutOrderService) createOrder(
 		Country:        &payChannelProduct.Country,
 		Cost:           &costFee,
 		Profit:         &profitFee,
+		FreezeAmount:   orderFreezeAmount,
 		SettleSnapshot: ordermodel.PayoutSettleSnapshot(orderSettle),
 		AID: func() uint64 {
 			if merchant.PId > 0 {
