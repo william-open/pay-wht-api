@@ -22,6 +22,8 @@ type CreateOrderReq struct {
 	PayMethod    string `json:"pay_method"`                         //支付方式
 	ClientId     string `json:"client_id"`                          //客户端IP
 	PayProductId string `json:"pay_product_id"`                     //上游支付产品ID【管理后台测试上游通道用】
+	IdentityType string `json:"identity_type"`                      //证件类型
+	IdentityNum  string `json:"identity_num"`                       //证件号码
 	Sign         string `json:"sign" binding:"required"`            //MD5 签名 32大写
 }
 
