@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dao"
@@ -49,14 +51,14 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		// 解析 JSON
 		var req dto.CreateOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			// 判断是否为字段验证错误 validator.ValidationErrors 类型断言，并逐项提取字段名与错误原因
+			// ✅ 1️⃣ 字段校验错误（validator）
 			var ve validator.ValidationErrors
 			if errors.As(err, &ve) {
-				errFields := make([]map[string]string, 0)
+				errFields := make([]map[string]string, 0, len(ve))
 				for _, fe := range ve {
 					errFields = append(errFields, map[string]string{
-						"field": fe.Field(),              // 字段名
-						"error": utils.ValidationMsg(fe), // 错误信息
+						"field": fe.Field(),
+						"error": utils.ValidationMsg(fe),
 					})
 				}
 				c.JSON(http.StatusBadRequest, gin.H{
@@ -68,12 +70,37 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 				return
 			}
 
-			// 非字段错误（如 JSON 格式错误）
-			log.Printf("错误不能解析数据: %v", err.Error())
-			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
+			// ✅ 2️⃣ JSON类型错误：隐藏系统信息，只提示通用错误
+			if strings.Contains(err.Error(), "cannot unmarshal") {
+				// 尝试提取字段名（例如 CreateOrderReq.tran_datetime）
+				re := regexp.MustCompile(`field (\w+\.)?(\w+)`)
+				fieldName := "unknown"
+				if m := re.FindStringSubmatch(err.Error()); len(m) > 2 {
+					fieldName = m[2]
+				}
+
+				// 记录详细错误到日志（开发人员可查）
+				log.Printf("[BindJSON] JSON类型错误: %v", err)
+
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code": 400,
+					"msg":  "参数类型错误",
+					"errors": []map[string]string{
+						{
+							"field": fieldName,
+							"error": "字段类型与预期不符",
+						},
+					},
+				})
+				c.Abort()
+				return
+			}
+
+			// ✅ 3️⃣ 其他 JSON 格式错误
+			log.Printf("[BindJSON] 无法解析请求体: %v", err)
+			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeParamsFormatError))
 			c.Abort()
 			return
-
 		}
 
 		// 4️⃣ 校验 timestamp 和 nonce
