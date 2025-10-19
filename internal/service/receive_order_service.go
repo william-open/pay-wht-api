@@ -687,6 +687,8 @@ func (s *ReceiveOrderService) callUpstreamService(
 		QueryUrl:     payChannelProduct.PayoutQueryApi,
 		MchNo:        payChannelProduct.UpAccount,
 		UpstreamCode: payChannelProduct.UpstreamCode,
+		IdentityType: req.IdentityType,
+		IdentityNum:  req.IdentityNum,
 		BankCode:     req.BankCode,
 		BankName:     req.BankName,
 		PayMethod:    req.PayMethod,
