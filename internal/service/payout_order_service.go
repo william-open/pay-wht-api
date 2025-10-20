@@ -361,21 +361,26 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 根据接平台银行编码查询平台银行信息
-	_, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+	platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
 	if pbErr != nil {
-		return "", fmt.Errorf(fmt.Sprintf("Bank code does not exist,%s", req.BankCode))
+		return "", fmt.Errorf(fmt.Sprintf("platform Bank code does not exist,%s", req.BankCode))
 	}
 	var bankName, bankCode string
 	// 根据接口ID+平台银行编码+国家货币查询对应上游银行编码+银行名称
-	upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
-	if ubErr != nil {
-		return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
-		//bankCode = platformBank.Code
-		//bankName = platformBank.Name
+	if payChannelProduct.InterfacePayoutVerifyBank > 0 {
+
+		upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
+		if ubErr != nil {
+			return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
+		} else {
+			bankCode = upstreamBank.UpstreamBankCode
+			bankName = upstreamBank.UpstreamBankName
+		}
 	} else {
-		bankCode = upstreamBank.UpstreamBankCode
-		bankName = upstreamBank.UpstreamBankName
+		bankCode = platformBank.Code
+		bankName = platformBank.Name
 	}
+
 	var upstreamRequest dto.UpstreamRequest
 	upstreamRequest.Currency = payChannelProduct.Currency
 	upstreamRequest.Amount = req.Amount
