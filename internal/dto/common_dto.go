@@ -181,19 +181,21 @@ type PayProductVo struct {
 	SysChannelCode  string
 	SysChannelTitle string
 	// 商户通道信息
-	MDefaultRate decimal.Decimal // 商户默认费率
-	MSingleFee   decimal.Decimal // 商户单笔费用
-	Status       int
-	CostRate     decimal.Decimal
-	CostFee      decimal.Decimal
-	MinAmount    *decimal.Decimal
-	MaxAmount    *decimal.Decimal
-	FixedAmount  string
-	SuccessRate  decimal.Decimal
-	UpAccount    string
-	UpApiKey     string
-	UpdateBy     string
-	Country      string
+	MDefaultRate              decimal.Decimal // 商户默认费率
+	MSingleFee                decimal.Decimal // 商户单笔费用
+	Status                    int
+	InterfacePayoutVerifyBank int
+	InterfacePayVerifyBank    int
+	CostRate                  decimal.Decimal
+	CostFee                   decimal.Decimal
+	MinAmount                 *decimal.Decimal
+	MaxAmount                 *decimal.Decimal
+	FixedAmount               string
+	SuccessRate               decimal.Decimal
+	UpAccount                 string
+	UpApiKey                  string
+	UpdateBy                  string
+	Country                   string
 	// 新增字段：从商户通道表中联查的权重
 	UpstreamWeight int    `gorm:"column:upstream_weight"`
 	InterfaceCode  string `gorm:"column:interface_code"`

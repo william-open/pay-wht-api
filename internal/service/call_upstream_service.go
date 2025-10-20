@@ -21,27 +21,29 @@ import (
 func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (string, string, string, error) {
 	// 组装请求参数
 	params := map[string]interface{}{
-		"mchNo":       req.MchNo,
-		"amount":      req.Amount,
-		"currency":    req.Currency,
-		"returnUrl":   req.RedirectUrl,
-		"payType":     req.UpstreamCode, // 注意：这是上游通道编码
-		"mchOrderId":  req.MchOrderId,
-		"productInfo": req.ProductInfo,
-		"apiKey":      req.ApiKey,
-		"providerKey": req.ProviderKey,
-		"accNo":       req.AccNo,
-		"accName":     req.AccName,
-		"payEmail":    req.PayEmail,
-		"payPhone":    req.PayPhone,
-		"bankCode":    req.BankCode,
-		"bankName":    req.BankName,
-		"payMethod":   req.PayMethod,
-		"mode":        req.Mode,
-		"clientIp":    req.ClientIp,
-		"notifyUrl":   req.NotifyUrl, // 添加通知URL
-		"submitUrl":   req.SubmitUrl, // 下单URL
-		"queryUrl":    req.QueryUrl,  // 查单URL
+		"mchNo":        req.MchNo,
+		"amount":       req.Amount,
+		"currency":     req.Currency,
+		"returnUrl":    req.RedirectUrl,
+		"payType":      req.UpstreamCode, // 注意：这是上游通道编码
+		"mchOrderId":   req.MchOrderId,
+		"productInfo":  req.ProductInfo,
+		"apiKey":       req.ApiKey,
+		"providerKey":  req.ProviderKey,
+		"accNo":        req.AccNo,
+		"accName":      req.AccName,
+		"payEmail":     req.PayEmail,
+		"payPhone":     req.PayPhone,
+		"bankCode":     req.BankCode,
+		"bankName":     req.BankName,
+		"payMethod":    req.PayMethod,
+		"identityType": req.IdentityType,
+		"identityNum":  req.IdentityNum,
+		"mode":         req.Mode,
+		"clientIp":     req.ClientIp,
+		"notifyUrl":    req.NotifyUrl, // 添加通知URL
+		"submitUrl":    req.SubmitUrl, // 下单URL
+		"queryUrl":     req.QueryUrl,  // 查单URL
 
 	}
 
