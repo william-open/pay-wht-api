@@ -86,11 +86,11 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	// ✅ 只认 data.code == "0" 成功
 	if string(response.Code) != "0" {
 		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
-		return "", "", "", fmt.Errorf("上游错误[%s]: %s", response.Data.Code, response.Data.Msg)
+		return "", "", "", fmt.Errorf("交易错误[%s]: %s", response.Data.Code, response.Data.Msg)
 	}
 	if response.Data.PayUrl == "" && !isValidURL(response.Data.PayUrl) {
 		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
-		return "", "", "", fmt.Errorf("上游错误[%s]: %s", response.Data.Code, response.Data.Msg)
+		return "", "", "", fmt.Errorf("交易错误[%s]: %s", response.Data.Code, response.Data.Msg)
 	}
 	// ✅ 成功日志
 	log.Printf("[Upstream-Receive] 收单下单成功, upOrderNo=%s, payUrl=%s, mOrderId=%s",
@@ -196,7 +196,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		if rollbackErr != nil {
 			return "", "", "", rollbackErr
 		}
-		return "", "", "", fmt.Errorf("上游错误[%v]: %s", response.Code, response.Msg)
+		return "", "", "", fmt.Errorf("交易错误[%v]: %s", response.Code, response.Msg)
 	}
 	// ✅ 只认 data.code == "0" 成功
 	log.Printf("[Upstream-Payout]上游供应商返回code: %s", response.Data.Code)
@@ -206,7 +206,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		if rollbackErr != nil {
 			return "", "", "", rollbackErr
 		}
-		return "", "", "", fmt.Errorf("上游错误[%v]: %v", response.Code, response.Data.Msg)
+		return "", "", "", fmt.Errorf("交易错误[%v]: %v", response.Code, response.Data.Msg)
 	}
 
 	log.Printf("[Upstream-Payout] 代付下单成功, upOrderNo=%s, mOrderId=%s, status=%s",
