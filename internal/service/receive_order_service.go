@@ -245,7 +245,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 			orderTable := shard.OrderShard.GetTable(order.OrderID, time.Now())
 
 			updateData := map[string]interface{}{
-				"status":      4,
+				"status":      5,
 				"update_time": time.Now(),
 			}
 
