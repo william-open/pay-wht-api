@@ -239,7 +239,23 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		lastErr = err
 	}
 
+	// 下单失败，更新订单状态
 	if payUrl == "" && lastErr != nil {
+		go func() {
+			orderTable := shard.OrderShard.GetTable(order.OrderID, time.Now())
+
+			updateData := map[string]interface{}{
+				"status":      4,
+				"update_time": time.Now(),
+			}
+
+			if updateErr := dal.OrderDB.Table(orderTable).
+				Where("order_id = ?", order.OrderID).
+				Updates(updateData).Error; updateErr != nil {
+				log.Printf("[代收]订单下单失败，更新订单状态失败，平台流水号: %v，错误: %v", order.OrderID, updateErr)
+			}
+		}()
+
 		resp = dto.CreateOrderResp{
 			TranFlow: req.TranFlow, PaySerialNo: strconv.FormatUint(oid, 10),
 			Amount: req.Amount, Code: "001", SysTime: strconv.FormatInt(utils.GetTimestampMs(), 10),

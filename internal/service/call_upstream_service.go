@@ -53,6 +53,12 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	// ✅ 检测上游是否可访问（带超时）
 	if err := utils.CheckUpstreamHealth(ctx, upstreamUrl); err != nil {
 		log.Printf("[Upstream-Receive] 健康检查失败: %v", err)
+		// ⚠️ 失败发送通知 Telegram
+		notify.Notify(system.BotChatID, "warn", "代收上游调用失败",
+			fmt.Sprintf("\n上游交易服务不可用\n代收下单地址: %s\n商户请求参数: %s",
+				upstreamUrl,
+				utils.MapToJSON(req),
+			), true)
 		return "", "", "", fmt.Errorf("上游服务不可用: %v", err)
 	}
 
@@ -156,6 +162,11 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	// ✅ 检测上游是否可访问（带超时）
 	if err := utils.CheckUpstreamHealth(ctx, upstreamUrl); err != nil {
 		log.Printf("[Upstream-Payout] 健康检查失败: %v", err)
+		notify.Notify(system.BotChatID, "warn", "代收上游调用失败",
+			fmt.Sprintf("\n上游交易服务不可用\n代付下单地址: %s\n商户请求参数: %s",
+				upstreamUrl,
+				utils.MapToJSON(req),
+			), true)
 		return "", "", "", fmt.Errorf("上游服务不可用: %v", err)
 	}
 
