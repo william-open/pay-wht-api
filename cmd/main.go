@@ -71,7 +71,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	// ------------------------------------------------------------------
+	//  API 路由注册区
+	// ------------------------------------------------------------------
 	v1 := r.Group("/api/v1")
 	{
 		receive := handler.NewReceiveOrderHandler()
@@ -90,8 +92,20 @@ func main() {
 		v1.POST("/order/reassign/submit", middleware.ReassignCreateAuth(), reassign.ReassignOrderCreate)
 	}
 
+	// ------------------------------------------------------------------
+	// 内部服务接口（供内部系统调用）
+	// ------------------------------------------------------------------
+	internal := r.Group("/api/v1/internal")
+	{
+		internal.Use(middleware.InternalAuth())
+		upstream := handler.NewUpstreamHandler()
+
+		// 通过上游交易号查询上游供应商配置信息
+		internal.POST("/upstream/config", upstream.ConfigQuery)
+	}
+
 	addr := ":" + config.C.Server.Port
-	log.Printf("listening %s", addr)
+	log.Printf("wht application listen port %s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatal(err)
 	}

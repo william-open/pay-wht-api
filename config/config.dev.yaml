@@ -94,3 +94,4 @@ upstream:
 #  receiveApiUrl: "http://up.test.8dacai.cyou/order/receive"
   receiveApiUrl: "http://localhost:9501/order/receive"
   payoutApiUrl: "http://localhost:9501/order/payout"
+  authToken: "178888"
