@@ -68,6 +68,7 @@ type OrderCfg struct {
 type UpstreamCfg struct {
 	ReceiveApiUrl string `mapstructure:"receiveApiUrl"`
 	PayoutApiUrl  string `mapstructure:"payoutApiUrl"`
+	AuthToken     string `mapstructure:"authToken"`
 }
 
 type ProjectCfg struct {

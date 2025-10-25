@@ -193,7 +193,7 @@ func (r *OrderDao) GetTxByUpOrderId(table string, upOrderId uint64) (*ordermodel
 	var m ordermodel.UpstreamTx
 	err := r.DB.Table(table).Where("up_order_id = ?", upOrderId).First(&m).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
+		return nil, fmt.Errorf("query not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)

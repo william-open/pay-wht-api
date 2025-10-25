@@ -931,3 +931,16 @@ func (d *MainDao) GetCountry(currency string) (dto.CurrencyCodeResponse, error) 
 	}
 	return ch, nil
 }
+
+// GetUpstreamSupplier 获取上游供应商配置信息
+func (d *MainDao) GetUpstreamSupplier(upstreamId uint64) (*dto.UpstreamSupplierDto, error) {
+	if err := d.checkDB(); err != nil {
+		return nil, fmt.Errorf("get upstream db connect failed: %w", err)
+	}
+
+	var upstream dto.UpstreamSupplierDto
+	if err := d.DB.Table("w_upstream").Where("id=?", upstreamId).Scan(&upstream).Error; err != nil {
+		return nil, fmt.Errorf("query upstream supplier failed: %w", err)
+	}
+	return &upstream, nil
+}
