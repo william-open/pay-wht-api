@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"golang.org/x/sync/singleflight"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 	"wht-order-api/internal/shard"
 
@@ -34,16 +36,28 @@ func NewInternalUpstreamService() *InternalUpstreamService {
 }
 
 // Get 根据上游交易号查询交易上游供应商配置信息
-func (s *InternalUpstreamService) Get(tradeId string) (*dto.UpstreamSupplierDto, error) {
+func (s *InternalUpstreamService) Get(tradeId string, tradeType string) (*dto.UpstreamSupplierDto, error) {
 	var resp *dto.UpstreamSupplierDto
 
 	tradeOrderId, err := strconv.ParseUint(tradeId, 10, 64)
 	if err != nil {
 		return resp, fmt.Errorf("上游交易订单号解析失败,Err:%v", err)
 	}
+	// 交易类型切片
+	tradeTypeSlice := []string{"receive", "payout"}
 
-	// 查询订单表
-	upOrderTable := shard.UpOrderShard.GetTable(tradeOrderId, time.Now())
+	if !slices.Contains(tradeTypeSlice, tradeType) {
+		return resp, fmt.Errorf("上游交易类型不支持,Err:%v", err)
+	}
+	var upOrderTable string
+	// 忽略大小写后相等
+	if strings.EqualFold("receive", tradeType) {
+		// 代收交易表
+		upOrderTable = shard.UpOrderShard.GetTable(tradeOrderId, time.Now())
+	} else {
+		// 代付交易表
+		upOrderTable = shard.UpOutOrderShard.GetTable(tradeOrderId, time.Now())
+	}
 	orderData, oErr := s.orderDao.GetTxByUpOrderId(upOrderTable, tradeOrderId)
 	if oErr != nil {
 		return resp, fmt.Errorf("上游交易订单号,Not Found,Err:%v", oErr)

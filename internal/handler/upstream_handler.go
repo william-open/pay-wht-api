@@ -27,7 +27,7 @@ func (h *UpstreamHandler) ConfigQuery(c *gin.Context) {
 		return
 	}
 	// 调用服务层处理
-	response, err := h.svc.Get(req.TradeOrderId)
+	response, err := h.svc.Get(req.TradeOrderId, req.TradeType)
 	if err != nil {
 		c.JSON(http.StatusOK, utils.Error(constant.CodeSystemError))
 		return
