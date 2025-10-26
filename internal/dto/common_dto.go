@@ -57,6 +57,7 @@ type UpstreamRequest struct {
 	QueryUrl     string `json:"queryUrl"`                          //查单RL
 	AccountType  string `json:"accountType"`                       //账户类型
 	CciNo        string `json:"cciNo"`                             //银行间账户
+	Address      string `json:"address"`                           //客户地址
 
 }
 
