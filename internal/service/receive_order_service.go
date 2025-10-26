@@ -687,6 +687,30 @@ func (s *ReceiveOrderService) callUpstreamService(
 		return "", errors.New("callUpstreamService req cannot be nil")
 	}
 	log.Printf("[Upstream-Receive-origin],请求参数: %+v", req)
+
+	var bankName, bankCode string
+	if req.BankCode != "" {
+		// 根据接平台银行编码查询平台银行信息
+		platformBank, pbErr := s.mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+		if pbErr != nil {
+			return "", fmt.Errorf(fmt.Sprintf("platform Bank code does not exist,%s", req.BankCode))
+		}
+		// 根据接口ID+平台银行编码+国家货币查询对应上游银行编码+银行名称
+		if payChannelProduct.InterfacePayoutVerifyBank > 0 {
+
+			upstreamBank, ubErr := s.mainDao.QueryUpstreamBankInfo(payChannelProduct.InterfaceID, req.BankCode, payChannelProduct.Currency)
+			if ubErr != nil {
+				return "", fmt.Errorf(fmt.Sprintf("upstream Bank code does not exist,%s", req.BankCode))
+			} else {
+				bankCode = upstreamBank.UpstreamBankCode
+				bankName = upstreamBank.UpstreamBankName
+			}
+		} else {
+			bankCode = platformBank.Code
+			bankName = platformBank.Name
+		}
+	}
+
 	upstreamRequest := dto.UpstreamRequest{
 		Currency:     payChannelProduct.Currency,
 		Amount:       req.Amount,
@@ -705,8 +729,8 @@ func (s *ReceiveOrderService) callUpstreamService(
 		UpstreamCode: payChannelProduct.UpstreamCode,
 		IdentityType: req.IdentityType,
 		IdentityNum:  req.IdentityNum,
-		BankCode:     req.BankCode,
-		BankName:     req.BankName,
+		BankCode:     bankCode,
+		BankName:     bankName,
 		PayMethod:    req.PayMethod,
 		PayEmail:     req.PayEmail,
 		NotifyUrl:    req.NotifyUrl,
