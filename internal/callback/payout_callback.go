@@ -154,7 +154,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	}
 	//代付订单失败不直接给商户推送消息
 	if statusText == "FAIL" {
-		notifyMsg := fmt.Sprintf("⚠️ [CALLBACK-PAYOUT] 订单代付失败，不自动进行商户推送，进入人工流程,,OrderID=%v, status=%s", order.OrderID, statusText)
+		notifyMsg := fmt.Sprintf("⚠️ [CALLBACK-PAYOUT] 订单代付失败，不自动进行商户推送，进入人工流程,OrderID= %v,UpOrderId= %v,MOrderId= %v, status= %s", order.OrderID, order.UpOrderID, order.MOrderID, statusText)
 		log.Printf(notifyMsg)
 		notify.Notify(system.BotChatID, "warn", "[CALLBACK-PAYOUT]",
 			notifyMsg, true)
