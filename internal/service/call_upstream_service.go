@@ -153,6 +153,8 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		"submitUrl":    req.SubmitUrl, // 下单URL
 		"queryUrl":     req.QueryUrl,  // 查单URL
 		"clientIp":     req.ClientIp,
+		"accountType":  req.AccountType, //账户类型
+		"cciNo":        req.CciNo,       //银行间账户号
 	}
 
 	upstreamUrl := config.C.Upstream.PayoutApiUrl

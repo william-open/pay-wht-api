@@ -141,6 +141,8 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			"identity_type": req.IdentityType,
 			"identity_num":  req.IdentityNum,
 			"pay_method":    req.PayMethod,
+			"account_type":  req.AccountType,
+			"cci_no":        req.CciNo,
 			"sign":          req.Sign,
 		}
 
