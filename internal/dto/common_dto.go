@@ -55,6 +55,8 @@ type UpstreamRequest struct {
 	ClientIp     string `json:"clientIp"`                          //客户端IP地址
 	SubmitUrl    string `json:"submitUrl"`                         //下单URL
 	QueryUrl     string `json:"queryUrl"`                          //查单RL
+	AccountType  string `json:"accountType"`                       //账户类型
+	CciNo        string `json:"cciNo"`                             //银行间账户
 
 }
 

@@ -24,6 +24,8 @@ type CreatePayoutOrderReq struct {
 	PayProductId string `json:"pay_product_id"`                     //上游支付产品ID【管理后台测试上游通道用】
 	Sign         string `json:"sign" binding:"required"`            //MD5 签名 32大写
 	ClientId     string `json:"client_id"`                          //客户端IP
+	AccountType  string `json:"account_type"`                       //账户类型
+	CciNo        string `json:"cci_no"`                             //银行间账户
 }
 
 // CreatePayoutOrderResp 创建代付订单返回数据
