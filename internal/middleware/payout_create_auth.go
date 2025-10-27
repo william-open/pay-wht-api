@@ -95,13 +95,15 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		}
 
 		// 根据接平台银行编码查询平台银行信息
-		_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
-		if pbErr != nil {
-			resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
-			log.Printf(resultMsg)
-			c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
-			c.Abort()
-			return
+		if req.BankCode != "" {
+			_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
+			if pbErr != nil {
+				resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
+				log.Printf(resultMsg)
+				c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
+				c.Abort()
+				return
+			}
 		}
 
 		// 获取请求IP
