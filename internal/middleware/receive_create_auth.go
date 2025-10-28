@@ -16,42 +16,62 @@ import (
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/notify"
 	"wht-order-api/internal/service"
+	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
-// ReceiveCreateAuth 中间件：验证 代收订单创建 POST JSON 请求签名
+// 统一失败响应+通知
+func failWithNotify(c *gin.Context, req dto.CreateOrderReq, code int, msg string, data interface{}) {
+	c.JSON(code, data)
+	go func() {
+		notify.Notify(
+			system.BotChatID,
+			"warn",
+			"[receive] 调用失败",
+			fmt.Sprintf(
+				"商户号: %s\n订单号: %s\n请求状态: Failed\n通道编码: %s\nIP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
+				req.MerchantNo,
+				req.TranFlow,
+				req.PayType,
+				utils.GetRealClientIP(c),
+				msg,
+				utils.MapToJSON(req),
+				utils.MapToJSON(data),
+			),
+			true,
+		)
+	}()
+	c.Abort()
+}
+
+// ReceiveCreateAuth 验证代收订单创建签名
 func ReceiveCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPost {
+		start := time.Now()
+
+		if c.Request.Method != http.MethodPost || c.ContentType() != "application/json" {
 			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
 			c.Abort()
 			return
 		}
 
-		if c.ContentType() != "application/json" {
-			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInvalidParams))
-			c.Abort()
-			return
-		}
+		// 限制Body大小，防止攻击
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1MB
 
-		// 读取 body
+		// 读取 Body
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			log.Printf("收到回调数据: %+v\n", 222)
-			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeInternalError))
-			c.Abort()
+			failWithNotify(c, dto.CreateOrderReq{}, http.StatusBadRequest, "读取请求体失败", utils.Error(constant.CodeInternalError))
 			return
 		}
-
-		// 恢复 body
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 		// 解析 JSON
 		var req dto.CreateOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			// ✅ 1️⃣ 字段校验错误（validator）
+			// ✅ 字段校验错误
 			var ve validator.ValidationErrors
 			if errors.As(err, &ve) {
 				errFields := make([]map[string]string, 0, len(ve))
@@ -61,102 +81,75 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 						"error": utils.ValidationMsg(fe),
 					})
 				}
-				c.JSON(http.StatusBadRequest, gin.H{
+				failWithNotify(c, req, http.StatusBadRequest, "参数校验失败", gin.H{
 					"code":   400,
 					"msg":    "参数校验失败",
 					"errors": errFields,
 				})
-				c.Abort()
 				return
 			}
 
-			// ✅ 2️⃣ JSON类型错误：隐藏系统信息，只提示通用错误
+			// ✅ JSON类型错误隐藏系统细节
 			if strings.Contains(err.Error(), "cannot unmarshal") {
-				// 尝试提取字段名（例如 CreateOrderReq.tran_datetime）
 				re := regexp.MustCompile(`field (\w+\.)?(\w+)`)
 				fieldName := "unknown"
 				if m := re.FindStringSubmatch(err.Error()); len(m) > 2 {
 					fieldName = m[2]
 				}
-
-				// 记录详细错误到日志（开发人员可查）
-				log.Printf("[BindJSON] JSON类型错误: %v", err)
-
-				c.JSON(http.StatusBadRequest, gin.H{
+				paramErr := gin.H{
 					"code": 400,
 					"msg":  "参数类型错误",
 					"errors": []map[string]string{
-						{
-							"field": fieldName,
-							"error": "字段类型与预期不符",
-						},
+						{"field": fieldName, "error": "字段类型与预期不符"},
 					},
-				})
-				c.Abort()
+				}
+				failWithNotify(c, req, http.StatusBadRequest, "JSON类型错误", paramErr)
 				return
 			}
 
-			// ✅ 3️⃣ 其他 JSON 格式错误
-			log.Printf("[BindJSON] 无法解析请求体: %v", err)
-			c.JSON(http.StatusBadRequest, utils.Error(constant.CodeParamsFormatError))
-			c.Abort()
+			failWithNotify(c, req, http.StatusBadRequest, "JSON解析错误", utils.Error(constant.CodeParamsFormatError))
 			return
 		}
 
-		// 4️⃣ 校验 timestamp 和 nonce
+		// 校验时间戳
 		tsInt, err := utils.ParseTimestamp(req.TranDatetime)
-		log.Printf("请求时间: %v", tsInt)
-		if err != nil || !utils.IsTimestampValid(tsInt, 1*time.Minute) {
-			log.Printf("请求超时: %v", req.TranDatetime)
-			c.JSON(http.StatusForbidden, utils.Error(constant.CodeTimeout))
-			c.Abort()
+		if err != nil || !utils.IsTimestampValid(tsInt, time.Minute) {
+			failWithNotify(c, req, http.StatusForbidden, "请求超时", utils.Error(constant.CodeTimeout))
 			return
 		}
 
-		// 查询商户信息
+		// 商户验证
 		mainDao := dao.NewMainDao()
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
-			log.Printf("商户不存在: %v", merchant)
-			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeMerchantDisabled))
-			c.Abort()
+			failWithNotify(c, req, http.StatusUnauthorized, "商户未启用", utils.Error(constant.CodeMerchantDisabled))
 			return
 		}
 
-		// 获取请求IP
 		clientId := utils.GetClientIP(c)
 		if clientId == "" {
-			log.Printf("未获取到客户端IP: %+v", merchant)
-			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeUnauthorized))
-			c.Abort()
+			failWithNotify(c, req, http.StatusUnauthorized, "无法识别IP", utils.Error(constant.CodeUnauthorized))
 			return
 		}
 
-		// 验证IP是否允许
+		// 白名单校验
 		verifyService := service.NewVerifyIpWhitelistService()
-		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1)
-		if !canAccess {
-			errorTipText := fmt.Sprintf("IP不允许访问: %+v,IP: %v", merchant, clientId)
-			go func() {
-				err := notify.SendTelegramMessage(merchant.TelegramGroupChatId, errorTipText)
-				if err != nil {
+		if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1) {
+			msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
+			go notify.SendTelegramMessage(merchant.TelegramGroupChatId, msg)
+			failWithNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
+			return
+		}
 
-				}
-			}()
-			c.JSON(http.StatusUnauthorized, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": fmt.Sprintf("IP:%s,不在白名单内，请联系运营人员进行添加", clientId)})
-			c.Abort()
-			return
-		}
 		req.ClientId = clientId
-		// 核查商户通道编码是否开启
-		canChannel := verifyService.VerifyChannelValid(merchant.MerchantID, req.PayType)
-		if !canChannel {
-			log.Printf("通道未启动: %+v,IP: %v", req.PayType, clientId)
-			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeChannelDisabled))
-			c.Abort()
+
+		// 通道是否启用
+		if !verifyService.VerifyChannelValid(merchant.MerchantID, req.PayType) {
+			failWithNotify(c, req, http.StatusUnauthorized, "通道未启用", utils.Error(constant.CodeChannelDisabled))
 			return
 		}
-		// 提取参数做签名（排除 Sign 字段）
+
+		// 验签
 		params := map[string]string{
 			"version":       req.Version,
 			"merchant_no":   req.MerchantNo,
@@ -166,7 +159,6 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			"pay_type":      req.PayType,
 			"notify_url":    req.NotifyUrl,
 			"redirect_url":  req.RedirectUrl,
-			//"currency":      req.Currency,
 			"product_info":  req.ProductInfo,
 			"acc_no":        req.AccNo,
 			"acc_name":      req.AccName,
@@ -179,26 +171,16 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			"bank_name":     req.BankName,
 			"sign":          req.Sign,
 		}
-
-		apiKey := merchant.ApiKey
-		//log.Printf("验证签名的密钥: %v", apiKey)
-		//log.Printf("待验参数: %v", params)
-		// 验签
-		if !utils.VerifySign(params, apiKey) {
-			errorTipText := utils.Error(constant.CodeSignatureError).Msg
-			go func() {
-				err := notify.SendTelegramMessage(merchant.TelegramGroupChatId, errorTipText)
-				if err != nil {
-
-				}
-			}()
-			c.JSON(http.StatusUnauthorized, utils.Error(constant.CodeSignatureError))
-			c.Abort()
+		if !utils.VerifySign(params, merchant.ApiKey) {
+			go notify.SendTelegramMessage(merchant.TelegramGroupChatId, "签名验证失败")
+			failWithNotify(c, req, http.StatusUnauthorized, "签名验证失败", utils.Error(constant.CodeSignatureError))
 			return
 		}
-		log.Printf("请求参数: %+v", req)
-		c.Set("pay_request", req)        // 放入 context 供 handler 使用
-		c.Set("request_type", "receive") // 放入 context 供 handler 使用
+
+		// ✅ 验证通过
+		log.Printf("[Receive] 校验通过: 商户号=%s, 通道=%s, 耗时=%v", req.MerchantNo, req.PayType, time.Since(start))
+		c.Set("pay_request", req)
+		c.Set("request_type", "receive")
 		c.Next()
 	}
 }

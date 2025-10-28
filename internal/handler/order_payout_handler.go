@@ -47,6 +47,7 @@ func (h *PayoutOrderPayoutHandler) PayoutOrderCreate(c *gin.Context) {
 	auditCtx.ChannelCode = req.PayType
 	auditCtx.CreatedAt = time.Now()
 	auditCtx.RequestType = requestType.(string)
+	auditCtx.IP = utils.GetRealClientIP(c)
 	// 调用服务层处理
 	response, err := h.svc.Create(req)
 	paySerialNo, parseErr := strconv.ParseUint(response.PaySerialNo, 10, 64)
@@ -94,6 +95,7 @@ func (h *PayoutOrderPayoutHandler) PayoutOrderQuery(c *gin.Context) {
 	auditCtx.TranFlow = req.TranFlow
 	auditCtx.Status = "success"
 	auditCtx.RequestType = requestType.(string)
+	auditCtx.IP = utils.GetRealClientIP(c)
 
 	// 调用服务层处理
 	response, err := h.svc.Get(req)
