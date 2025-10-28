@@ -7,31 +7,79 @@ import (
 	"github.com/joho/godotenv"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
+// TelegramMessage Telegram API 发送体
 type TelegramMessage struct {
 	ChatID string `json:"chat_id"`
 	Text   string `json:"text"`
 	Parse  string `json:"parse_mode,omitempty"`
 }
 
+// TelegramResponse 响应体
 type TelegramResponse struct {
 	Ok          bool   `json:"ok"`
 	Description string `json:"description,omitempty"`
 }
 
+// ================= 全局初始化 =================
+
+var (
+	httpClient *http.Client
+	botToken   string
+)
+
 func init() {
-	_ = godotenv.Load() // 自动加载 .env 文件
+	_ = godotenv.Load()
+
+	botToken = os.Getenv("TELEGRAM_BOT_TOKEN")
+	if botToken == "" {
+		log.Println("[Telegram] ⚠️ TELEGRAM_BOT_TOKEN 未设置，消息无法发送。")
+	}
+
+	// 构建带超时与代理支持的 http.Client
+	httpClient = buildHTTPClient()
+}
+
+// ================= HTTP 客户端构造 =================
+
+func buildHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second, // 建立连接超时
+			KeepAlive: 60 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          20,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   8 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// 支持手动代理配置
+	if proxy := os.Getenv("HTTP_PROXY"); proxy != "" {
+		if proxyURL, err := url.Parse(proxy); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
+			log.Printf("[Telegram] 🌐 使用代理: %s\n", proxy)
+		}
+	}
+
+	return &http.Client{
+		Timeout:   10 * time.Second, // 整体请求超时
+		Transport: transport,
+	}
 }
 
 // ================= 基础发送函数 =================
 
-// SendTelegramMessage 同步发送
-func SendTelegramMessage(chatID string, content string) error {
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+// SendTelegramMessage 同步发送（带重试机制）
+func SendTelegramMessage(chatID, content string) error {
 	if botToken == "" {
 		return fmt.Errorf("missing TELEGRAM_BOT_TOKEN in env")
 	}
@@ -48,27 +96,48 @@ func SendTelegramMessage(chatID string, content string) error {
 	}
 
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("http post error: %w", err)
-	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response error: %w", err)
+	var lastErr error
+	const maxRetries = 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := httpClient.Post(url, "application/json", bytes.NewBuffer(body))
+		if err != nil {
+			lastErr = fmt.Errorf("http post error: %w", err)
+			log.Printf("[Telegram][%v] 第 %d/%d 次发送失败: %v", chatID, attempt, maxRetries, err)
+
+			sleep := time.Duration(attempt*2) * time.Second // 指数退避
+			time.Sleep(sleep)
+			continue
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("telegram http status %d: %s", resp.StatusCode, string(respBody))
+			log.Printf("[Telegram][%v] 第 %d/%d 次返回错误: %v", chatID, attempt, maxRetries, lastErr)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+			continue
+		}
+
+		var tgResp TelegramResponse
+		if err := json.Unmarshal(respBody, &tgResp); err != nil {
+			lastErr = fmt.Errorf("unmarshal response error: %w", err)
+			continue
+		}
+
+		if !tgResp.Ok {
+			lastErr = fmt.Errorf("telegram send failed: %s", tgResp.Description)
+			log.Printf("[Telegram][%v] 第 %d/%d 次失败: %s", chatID, attempt, maxRetries, tgResp.Description)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+			continue
+		}
+
+		// ✅ 成功
+		return nil
 	}
 
-	var tgResp TelegramResponse
-	if err := json.Unmarshal(respBody, &tgResp); err != nil {
-		return fmt.Errorf("unmarshal response error: %w", err)
-	}
-
-	if !tgResp.Ok {
-		return fmt.Errorf("telegram send failed: %s", tgResp.Description)
-	}
-
-	return nil
+	return fmt.Errorf("telegram send failed after %d retries: %w", maxRetries, lastErr)
 }
 
 // AsyncNotify 异步发送
@@ -80,14 +149,14 @@ func AsyncNotify(chatID string, content string) {
 	}()
 }
 
-// ================= 消息模版 =================
+// ================= 消息模板 =================
 
 func InfoMessage(title, content string) string {
 	return fmt.Sprintf("ℹ️ *%s*\n\n%s", title, content)
 }
 
 func WarningMessage(title, content string) string {
-	return fmt.Sprintf("⚠️ *%s*\n\n```%s```", title, content)
+	return fmt.Sprintf("⚠️ *%s*\n\n```\n%s\n```", title, content)
 }
 
 func ErrorMessage(title, content string) string {

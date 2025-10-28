@@ -43,6 +43,7 @@ func (h *ReceiveOrderHandler) ReceiveOrderCreate(c *gin.Context) {
 	auditCtx.ChannelCode = req.PayType
 	auditCtx.CreatedAt = time.Now()
 	auditCtx.RequestType = requestType.(string)
+	auditCtx.IP = utils.GetRealClientIP(c)
 
 	// 调用服务层处理
 	response, err := h.svc.Create(req)
@@ -96,6 +97,7 @@ func (h *ReceiveOrderHandler) ReceiveOrderQuery(c *gin.Context) {
 	auditCtx.TranFlow = req.TranFlow
 	auditCtx.Status = "success"
 	auditCtx.RequestType = requestType.(string)
+	auditCtx.IP = utils.GetRealClientIP(c)
 
 	// 调用服务层处理
 	response, err := h.svc.Get(req)

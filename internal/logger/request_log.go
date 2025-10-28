@@ -1,11 +1,15 @@
 package logger
 
 import (
+	"fmt"
 	"log"
 	"wht-order-api/internal/dal"
 	"wht-order-api/internal/dto"
 	orderModel "wht-order-api/internal/model/order"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
+	"wht-order-api/internal/system"
+	"wht-order-api/internal/utils"
 )
 
 // WriteOrderLog 写入请求日志
@@ -30,6 +34,19 @@ func WriteOrderLog(payload *dto.AuditContextPayload) {
 		log.Printf("[AuditLogger] 表名为空，PlatformOrderID=%d, CreatedAt=%v", payload.PlatformOrderID, payload.CreatedAt)
 		return
 	}
+	//TG 通知
+	if payload.Status == "failed" {
+		// ⚠️ 失败发送通知 Telegram
+		notify.Notify(system.BotChatID, "warn", fmt.Sprintf("[%s]调用失败", payload.RequestType),
+			fmt.Sprintf("商户订单号: %s\n请求状态: %s\n商户号:%s\n请求参数: %s\n响应参数: %s",
+				payload.TranFlow,
+				payload.Status,
+				payload.MerchantNo,
+				utils.MapToJSON(payload.RequestBody),
+				utils.MapToJSON(payload.ResponseBody),
+			), true)
+	}
+
 	logEntry := orderModel.MerchantOrderLog{
 		PlatformOrderID: payload.PlatformOrderID,
 		MerchantNo:      payload.MerchantNo,

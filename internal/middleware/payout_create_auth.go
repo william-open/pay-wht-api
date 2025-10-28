@@ -9,123 +9,129 @@ import (
 	"log"
 	"net/http"
 	"time"
+	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/notify"
 	"wht-order-api/internal/service"
+	"wht-order-api/internal/system"
 	"wht-order-api/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
-// PayoutCreateAuth 中间件：验证 代付订单创建 POST JSON 请求签名
+// 统一错误响应 + 通知
+func failPayoutWithTgNotify(c *gin.Context, req dto.CreatePayoutOrderReq, httpCode int, msg string, data interface{}) {
+	c.JSON(httpCode, data)
+	go func() {
+		notify.Notify(
+			system.BotChatID,
+			"warn",
+			"[payout] 调用失败",
+			fmt.Sprintf(
+				"商户号: %s\n订单号: %s\n请求状态: Failed\n通道编码: %s\nIP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
+				req.MerchantNo,
+				req.TranFlow,
+				req.PayType,
+				utils.GetRealClientIP(c),
+				msg,
+				utils.MapToJSON(req),
+				utils.MapToJSON(data),
+			),
+			true,
+		)
+	}()
+	c.Abort()
+}
+
+// PayoutCreateAuth 中间件：验证代付订单创建签名
 func PayoutCreateAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if c.Request.Method != http.MethodPost {
+		start := time.Now()
+
+		if c.Request.Method != http.MethodPost || c.ContentType() != "application/json" {
 			c.Next()
 			return
 		}
 
-		if c.ContentType() != "application/json" {
-			c.Next()
-			return
-		}
+		// 限制 body 大小防止攻击
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20) // 1MB
 
-		// 读取 body
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
-			log.Printf("收到回调数据: %+v\n", 222)
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": "cannot read body"})
-			c.Abort()
+			failPayoutWithTgNotify(c, dto.CreatePayoutOrderReq{}, http.StatusBadRequest, "无法读取请求体", utils.Error(constant.CodeInternalError))
 			return
 		}
-
-		// 恢复 body
 		c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-		// 解析 JSON
 		var req dto.CreatePayoutOrderReq
 		if err := c.ShouldBindJSON(&req); err != nil {
-			// 判断是否为字段验证错误 validator.ValidationErrors 类型断言，并逐项提取字段名与错误原因
 			var ve validator.ValidationErrors
 			if errors.As(err, &ve) {
-				errFields := make([]map[string]string, 0)
+				errFields := make([]map[string]string, 0, len(ve))
 				for _, fe := range ve {
 					errFields = append(errFields, map[string]string{
-						"field": fe.Field(),              // 字段名
-						"error": utils.ValidationMsg(fe), // 错误信息
+						"field": fe.Field(),
+						"error": utils.ValidationMsg(fe),
 					})
 				}
-				c.JSON(http.StatusBadRequest, gin.H{
+				failPayoutWithTgNotify(c, req, http.StatusBadRequest, "参数校验失败", gin.H{
 					"code":   400,
 					"msg":    "参数校验失败",
 					"errors": errFields,
 				})
-				c.Abort()
 				return
 			}
 
-			// 非字段错误（如 JSON 格式错误）
-			c.JSON(http.StatusBadRequest, gin.H{
+			failPayoutWithTgNotify(c, req, http.StatusBadRequest, "请求格式错误", gin.H{
 				"code": 400,
-				"msg":  "请求格式错误: " + err.Error(),
+				"msg":  "JSON格式错误，请检查参数类型",
 			})
-			c.Abort()
 			return
 		}
 
-		// 4️⃣ 校验 timestamp 和 nonce
+		// 校验时间戳
 		tsInt, err := utils.ParseTimestamp(req.TranDatetime)
-		log.Printf("请求时间: %v", tsInt)
-		if err != nil || !utils.IsTimestampValid(tsInt, 1*time.Minute) {
-			log.Printf("请求超时: %v", req.TranDatetime)
-			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "request timeout"})
-			c.Abort()
+		if err != nil || !utils.IsTimestampValid(tsInt, time.Minute) {
+			failPayoutWithTgNotify(c, req, http.StatusForbidden, "请求超时", utils.Error(constant.CodeTimeout))
 			return
 		}
-		// 核心库实例
+
 		mainDao := dao.NewMainDao()
 
-		// 查询商户信息
+		// 校验商户
 		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		if merchant.Status != 1 {
-			log.Printf("商户不存在: %v", merchant)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "unauthorized"})
-			c.Abort()
+			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, "商户未启用", utils.Error(constant.CodeMerchantDisabled))
 			return
 		}
 
-		// 根据接平台银行编码查询平台银行信息
+		// 校验银行编码
 		if req.BankCode != "" {
-			_, pbErr := mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency)
-			if pbErr != nil {
-				resultMsg := fmt.Sprintf("Bank code does not exist,%s", req.BankCode)
-				log.Printf(resultMsg)
-				c.JSON(http.StatusForbidden, gin.H{"code": 400, "msg": resultMsg})
-				c.Abort()
+			if _, err := mainDao.QueryPlatformBankInfo(req.BankCode, merchant.Currency); err != nil {
+				msg := fmt.Sprintf("银行编码不存在: %s", req.BankCode)
+				failPayoutWithTgNotify(c, req, http.StatusBadRequest, msg, gin.H{"code": 400, "msg": msg})
 				return
 			}
 		}
 
-		// 获取请求IP
+		// 获取客户端 IP
 		clientId := utils.GetClientIP(c)
 		if clientId == "" {
-			log.Printf("未获取到客户端IP: %+v", merchant)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "Unauthorized,IP Error"})
-			c.Abort()
+			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, "无法识别客户端IP", utils.Error(constant.CodeUnauthorized))
 			return
 		}
 		req.ClientId = clientId
-		// 验证IP是否允许
+
+		// 验证 IP 白名单（类型 2 = 代付）
 		verifyService := service.NewVerifyIpWhitelistService()
-		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
-		if !canAccess {
-			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
-			c.Abort()
+		if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2) {
+			msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
+			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
 			return
 		}
 
-		// 提取参数做签名（排除 Sign 字段）
+		// 构造签名参数（排除 sign）
 		params := map[string]string{
 			"version":       req.Version,
 			"merchant_no":   req.MerchantNo,
@@ -149,17 +155,17 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			"sign":          req.Sign,
 		}
 
-		apiKey := merchant.ApiKey
-		//log.Printf("验证签名的密钥: %v", apiKey)
-		//log.Printf("待验参数: %v", params)
 		// 验签
-		if !utils.VerifySign(params, apiKey) {
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid signature"})
-			c.Abort()
+		if !utils.VerifySign(params, merchant.ApiKey) {
+			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, "签名验证失败", utils.Error(constant.CodeSignatureError))
 			return
 		}
-		c.Set("payout_request", req)    // 放入 context 供 handler 使用
-		c.Set("request_type", "payout") // 放入 context 供 handler 使用
+
+		log.Printf("[Payout] ✅ 验签通过 商户号=%s 通道=%s IP=%s 耗时=%v",
+			req.MerchantNo, req.PayType, clientId, time.Since(start))
+
+		c.Set("payout_request", req)
+		c.Set("request_type", "payout")
 		c.Next()
 	}
 }
