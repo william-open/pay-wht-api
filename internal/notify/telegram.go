@@ -87,7 +87,7 @@ func SendTelegramMessage(chatID, content string) error {
 	msg := TelegramMessage{
 		ChatID: chatID,
 		Text:   content,
-		Parse:  "Markdown",
+		Parse:  "MarkdownV2",
 	}
 
 	body, err := json.Marshal(msg)
