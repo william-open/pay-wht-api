@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -65,16 +66,28 @@ type OrderCfg struct {
 	CreateTimeoutSec int `mapstructure:"createTimeoutSec"`
 }
 
+type RetryConfig struct {
+	Times    int           `mapstructure:"times"`
+	Interval time.Duration `mapstructure:"interval"`
+}
+
 type UpstreamCfg struct {
-	ReceiveApiUrl string `mapstructure:"receiveApiUrl"`
-	PayoutApiUrl  string `mapstructure:"payoutApiUrl"`
-	AuthToken     string `mapstructure:"authToken"`
+	ReceiveApiUrl string        `mapstructure:"receiveApiUrl"`
+	PayoutApiUrl  string        `mapstructure:"payoutApiUrl"`
+	AuthToken     string        `mapstructure:"authToken"`
+	Timeout       TimeoutConfig `mapstructure:"timeout"`
+	Retry         RetryConfig   `mapstructure:"retry"`
 }
 
 type ProjectCfg struct {
 	Name      string `mapstructure:"name"`
 	Version   string `mapstructure:"version"`
 	Copyright string `mapstructure:"copyright"`
+}
+
+type TimeoutConfig struct {
+	Receive time.Duration `mapstructure:"receive"`
+	Payout  time.Duration `mapstructure:"payout"`
 }
 
 type Root struct {
