@@ -36,3 +36,8 @@ const (
 	CodeMerchantDisabled = 1206 // 商户账号已被禁用，可能由于违规操作或安全原因
 	CodeMerchantAbnormal = 1207 // 商户异常,请联系客服
 )
+
+// 订单相关
+const (
+	CodeTransactionFailed = 1300 //交易失败
+)

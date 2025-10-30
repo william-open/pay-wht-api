@@ -47,7 +47,14 @@ func (h *ReceiveOrderHandler) ReceiveOrderCreate(c *gin.Context) {
 
 	// 调用服务层处理
 	response, err := h.svc.Create(req)
-
+	if err != nil {
+		auditCtx.Status = "failed"
+		auditCtx.ErrorMsg = err.Error()
+		auditCtx.ResponseBody = `{"code":400,"msg":"` + err.Error() + `"}`
+		log.Printf("[TraceId]: %+v,响应信息: %+v", auditCtx.TraceID, err.Error())
+		c.JSON(http.StatusOK, utils.ErrorWithTrace(constant.CodeTransactionFailed, auditCtx.TraceID))
+		return
+	}
 	paySerialNo, parseErr := strconv.ParseUint(response.PaySerialNo, 10, 64)
 	if parseErr != nil {
 		log.Printf("[TraceId]: %+v,响应信息: %+v", auditCtx.TraceID, err.Error())
