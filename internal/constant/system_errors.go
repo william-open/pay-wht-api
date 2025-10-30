@@ -34,4 +34,5 @@ const (
 	CodeAccessDenied     = 1204 // 访问权限不足，当前身份没有执行该操作的权限
 	CodeIPNotWhitelisted = 1205 // IP不在白名单内，请求来源IP未被授权访问该服务
 	CodeMerchantDisabled = 1206 // 商户账号已被禁用，可能由于违规操作或安全原因
+	CodeMerchantAbnormal = 1207 // 商户异常,请联系客服
 )

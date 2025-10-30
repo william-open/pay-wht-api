@@ -51,7 +51,7 @@ func (d *MainDao) GetMerchant(mid string) (*mainmodel.Merchant, error) {
 
 	var m mainmodel.Merchant
 	if err := d.DB.Where("app_id=?", mid).First(&m).Error; err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
+		return nil, fmt.Errorf("query merchant failed: %w", err)
 	}
 	return &m, nil
 }
