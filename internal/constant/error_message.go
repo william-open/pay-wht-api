@@ -45,6 +45,7 @@ var ErrorMessages = map[int]ErrorInfo{
 	CodeOrderPaid:          {"订单已支付", "Order already paid"},
 	CodeOrderRefunded:      {"订单已退款", "Order already refunded"},
 	CodeOrderClosed:        {"订单已关闭", "Order closed"},
+	CodeTransactionFailed:  {"交易失败", "Transaction failed"},
 
 	// 支付通道相关错误
 	CodeChannelNotFound:     {"支付通道不存在", "Channel not found"},
