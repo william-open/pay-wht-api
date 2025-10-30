@@ -93,14 +93,18 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		// 校验时间戳
 		tsInt, err := utils.ParseTimestamp(req.TranDatetime)
 		if err != nil || !utils.IsTimestampValid(tsInt, time.Minute) {
-			failPayoutWithTgNotify(c, req, http.StatusForbidden, "请求超时", utils.Error(constant.CodeTimeout))
+			failPayoutWithTgNotify(c, req, http.StatusForbidden, "请求过期", utils.Error(constant.CodeTimeout))
 			return
 		}
 
 		mainDao := dao.NewMainDao()
 
 		// 校验商户
-		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
+		merchant, mErr := mainDao.GetMerchant(req.MerchantNo)
+		if mErr != nil {
+			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, "商户异常", utils.Error(constant.CodeMerchantAbnormal))
+			return
+		}
 		if merchant.Status != 1 {
 			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, "商户未启用", utils.Error(constant.CodeMerchantDisabled))
 			return

@@ -9,10 +9,17 @@ type ErrorInfo struct {
 // ErrorMessages 错误信息映射
 var ErrorMessages = map[int]ErrorInfo{
 	// 系统错误
-	CodeSuccess:          {"操作成功", "Success"},
-	CodeSystemError:      {"系统错误", "System error"},
-	CodeDatabaseError:    {"数据库错误", "Database error"},
-	CodeIPNotWhitelisted: {"IP不在白名单内", "Ip not in the whitelist error"},
+	CodeSuccess:           {"操作成功", "Success"},
+	CodeSystemError:       {"系统错误", "System error"},
+	CodeDatabaseError:     {"数据库错误", "Database error"},
+	CodeIPNotWhitelisted:  {"IP不在白名单内", "Ip not in the whitelist error"},
+	CodeInternalError:     {"读取请求体失败", "Failed to read request body"},
+	CodeTimeout:           {"请求过期,重新发起请求", "Request expired, resubmit request"},
+	CodeParamsFormatError: {"参数格式错误，参数值格式不正确", "Parameter format error, parameter value format incorrect"},
+	CodeUnauthorized:      {"无法识别IP", "Unable to recognize IP address"},
+	CodeSignatureError:    {"签名验证失败", "Signature verification failed"},
+	CodeMissingParams:     {"缺少必要参数，请求中缺失必须提供的参数字段", "Missing required parameters; the request is missing a required parameter field."},
+	CodeParamsTypeError:   {"参数类型错误，参数值类型与预期类型不匹配", "Parameter type error; parameter value type does not match the expected type."},
 
 	// 上游错误
 	CodeUpstreamError: {"上游通道错误", "Upstream channel error"},
@@ -25,6 +32,8 @@ var ErrorMessages = map[int]ErrorInfo{
 	CodeMerchantRateInvalid:  {"商户费率配置无效", "Merchant rate invalid"},
 	CodeMerchantLimitReached: {"商户交易限额已满", "Merchant limit reached"},
 	CodeMerchantKeyInvalid:   {"商户密钥无效", "Merchant key invalid"},
+	CodeMerchantAbnormal:     {"商户异常", "Merchant Abnormal"},
+	CodeMerchantDisabled:     {"商户未启用", "Merchant not activated"},
 
 	// 订单相关错误
 	CodeOrderNotFound:      {"订单不存在", "Order not found"},

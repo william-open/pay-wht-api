@@ -114,13 +114,17 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 		// 校验时间戳
 		tsInt, err := utils.ParseTimestamp(req.TranDatetime)
 		if err != nil || !utils.IsTimestampValid(tsInt, time.Minute) {
-			failWithNotify(c, req, http.StatusForbidden, "请求超时", utils.Error(constant.CodeTimeout))
+			failWithNotify(c, req, http.StatusForbidden, "请求过期", utils.Error(constant.CodeTimeout))
 			return
 		}
 
 		// 商户验证
 		mainDao := dao.NewMainDao()
-		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
+		merchant, mErr := mainDao.GetMerchant(req.MerchantNo)
+		if mErr != nil {
+			failWithNotify(c, req, http.StatusUnauthorized, "商户异常", utils.Error(constant.CodeMerchantAbnormal))
+			return
+		}
 		if merchant.Status != 1 {
 			failWithNotify(c, req, http.StatusUnauthorized, "商户未启用", utils.Error(constant.CodeMerchantDisabled))
 			return
