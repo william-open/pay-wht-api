@@ -102,7 +102,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	}
 
 	// ✅ 判断响应成功
-	if string(response.Code) != "0" {
+	if !isSuccessCode(string(response.Code)) || string(response.Data.Code) != "0" {
 		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
 		notify.NotifyUpstreamAlert("warn", "代收上游交易错误", upstreamUrl, req, response, map[string]string{
 			"上游Code": string(response.Data.Code),
@@ -114,7 +114,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	if response.Data.PayUrl == "" || !isValidURL(response.Data.PayUrl) {
 		log.Printf("[Upstream-Receive] 上游返回错误: payUrl 无效")
 		notify.NotifyUpstreamAlert("warn", "代收上游返回无效支付链接", upstreamUrl, req, response, nil)
-		return "", "", "", fmt.Errorf("上游返回无效支付链接")
+		return "", "", "", fmt.Errorf("交易失败")
 	}
 
 	log.Printf("[Upstream-Receive] 收单下单成功, upOrderNo=%s, payUrl=%s, mOrderId=%s",
