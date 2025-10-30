@@ -20,6 +20,7 @@ var ErrorMessages = map[int]ErrorInfo{
 	CodeSignatureError:    {"签名验证失败", "Signature verification failed"},
 	CodeMissingParams:     {"缺少必要参数，请求中缺失必须提供的参数字段", "Missing required parameters; the request is missing a required parameter field."},
 	CodeParamsTypeError:   {"参数类型错误，参数值类型与预期类型不匹配", "Parameter type error; parameter value type does not match the expected type."},
+	CodeInvalidParams:     {"参数格式错误，请求参数不符合预期格式或规范", "The parameter format is incorrect; the request parameters do not conform to the expected format or specification."},
 
 	// 上游错误
 	CodeUpstreamError: {"上游通道错误", "Upstream channel error"},
