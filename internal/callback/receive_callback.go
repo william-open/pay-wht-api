@@ -264,7 +264,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 					url,
 					resp.StatusCode,
 					utils.MapToJSON(payload),
-					utils.MapToJSON(respBody),
+					respStr,
 				),
 				true,
 			)
@@ -281,7 +281,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 				url,
 				resp.StatusCode,
 				utils.MapToJSON(payload),
-				utils.MapToJSON(respBody),
+				respStr,
 			),
 			true,
 		)
@@ -301,7 +301,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 			payload.TranFlow,
 			url,
 			utils.MapToJSON(payload),
-			utils.MapToJSON(respBody),
+			respStr,
 		),
 		true,
 	)
