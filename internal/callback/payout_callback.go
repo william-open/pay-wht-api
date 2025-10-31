@@ -2,9 +2,10 @@ package callback
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -40,6 +41,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	// 1) 转换商户订单号
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
 	if err != nil {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️ order %v,  商户订单号转换失败: %v", msg.MOrderID, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 商户订单号转换失败: %v", err)
 	}
 
@@ -49,6 +52,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	if err := dal.OrderDB.Table(txTable).
 		Where("up_order_id = ?", mOrderIdNum).
 		First(&upOrder).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️ 上游订单不存在 MOrderID=%v: %v", mOrderIdNum, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 上游订单不存在 MOrderID=%v: %w", mOrderIdNum, err)
 	}
 
@@ -75,6 +80,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 			"up_order_no": upOrder.UpOrderNo,
 			"notify_time": upOrder.NotifyTime,
 		}).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️ 更新上游订单失败 MOrderID=%v: %v", mOrderIdNum, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 更新上游订单失败 MOrderID=%v: %w", mOrderIdNum, err)
 	}
 
@@ -84,6 +91,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	if err := dal.OrderDB.Table(orderTable).
 		Where("order_id = ?", upOrder.OrderID).
 		First(&order).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️  商户订单不存在 OrderID=%v: %v", upOrder.OrderID, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 商户订单不存在 OrderID=%v: %w", upOrder.OrderID, err)
 	}
 
@@ -96,6 +105,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 			"status":      order.Status,
 			"notify_time": order.NotifyTime,
 		}).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️  更新商户订单失败 OrderID=%v: %v", upOrder.OrderID, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 更新商户订单失败 OrderID=%v: %w", upOrder.OrderID, err)
 	}
 
@@ -103,6 +114,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	mainDao := dao.NewMainDao()
 	merchant, err := mainDao.GetMerchantId(upOrder.MerchantID)
 	if err != nil || merchant == nil || merchant.Status != 1 {
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️  商户无效 merchantID=%v, err=%v", upOrder.MerchantID, err), true)
 		return fmt.Errorf("[CALLBACK-PAYOUT] 商户无效 merchantID=%v, err=%v", upOrder.MerchantID, err)
 	}
 
@@ -131,6 +144,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		go func() {
 			country, cErr := mainDao.GetCountry(order.Currency)
 			if cErr != nil {
+				notify.Notify(system.BotChatID, "warn", "代付回调商户",
+					fmt.Sprintf("⚠️  获取国家信息异常: %v", cErr), true)
 				log.Printf("获取国家信息异常: %v", cErr)
 			}
 			if err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
@@ -148,6 +163,8 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 				Currency:   order.Currency,
 				CreateTime: time.Now(),
 			}); err != nil {
+				notify.Notify(system.BotChatID, "warn", "代付回调商户",
+					fmt.Sprintf("⚠️  发布订单统计失败 OrderID=%v: %v", order.OrderID, err), true)
 				log.Printf("发布订单统计失败 OrderID=%v: %v", order.OrderID, err)
 			}
 		}()
@@ -175,54 +192,100 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	for i := 1; i <= payoutMaxRetry; i++ {
 		lastErr = s.payoutNotifyMerchant(order.NotifyURL, payload)
 		if lastErr == nil {
+			notify.Notify(system.BotChatID, "warn", "代付回调商户",
+				fmt.Sprintf("⚠️   已成功通知商户 OrderID=%v (第%d次)", order.OrderID, i), true)
 			log.Printf("✅ [CALLBACK-PAYOUT] 已成功通知商户 OrderID=%v (第%d次)", order.OrderID, i)
 			return nil
 		}
 		log.Printf("⚠️ [CALLBACK-PAYOUT] 通知商户失败 OrderID=%v (第%d/%d次): %v",
 			order.OrderID, i, payoutMaxRetry, lastErr)
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			fmt.Sprintf("⚠️   通知商户失败 OrderID=%v (第%d/%d次): %v",
+				order.OrderID, i, payoutMaxRetry, lastErr), true)
 		time.Sleep(time.Duration(i*2) * time.Second)
 	}
+
+	notify.Notify(system.BotChatID, "warn", "代付回调商户",
+		fmt.Sprintf("⚠️  通知商户失败 merchant=%v, orderID=%v, retries=%d, lastErr=%v", payload.MerchantNo, order.OrderID, payoutMaxRetry, lastErr), true)
 
 	return fmt.Errorf("[CALLBACK-PAYOUT] 通知商户失败 merchant=%v, orderID=%v, retries=%d, lastErr=%v",
 		payload.MerchantNo, order.OrderID, payoutMaxRetry, lastErr)
 }
 
-// 通知商户并检查响应
+// notifyPayoutCallback 通知 Telegram 封装
+func notifyPayoutCallback(level, title string, payload dto.PayoutNotifyMerchantPayload, url, desc, req, resp string) {
+	text := fmt.Sprintf(
+		"商户号: %s\n订单号: %s\n回调地址: %s\n描述: %s\n请求参数: %s\n响应参数: %s",
+		payload.MerchantNo,
+		payload.TranFlow,
+		url,
+		desc,
+		req,
+		resp,
+	)
+	notify.Notify(system.BotChatID, level, title, text, true)
+}
+
+// payoutNotifyMerchant 通知商户并检查响应
 func (s *PayoutCallback) payoutNotifyMerchant(url string, payload dto.PayoutNotifyMerchantPayload) error {
 	// 转 JSON
 	body, err := json.Marshal(payload)
 	if err != nil {
+		notifyPayoutCallback("warn", "[回调商户-代付] 序列化失败", payload, url, err.Error(), utils.MapToJSON(payload), "")
 		return fmt.Errorf("[CALLBACK-PAYOUT] failed to marshal payload: %w", err)
 	}
+
 	log.Printf("[CALLBACK-PAYOUT] >>回调下游商户参数: %s", string(body))
 
-	// 一定是 POST，并发送 JSON
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
+	// 带超时的 HTTP 客户端
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] failed to send notification: %w", err)
+		notifyPayoutCallback("warn", "[回调商户-代付] 请求失败", payload, url, err.Error(), string(body), "")
+		return fmt.Errorf("[CALLBACK-PAYOUT] send error: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("[CALLBACK-PAYOUT] notification failed with status: %d, body: %s", resp.StatusCode, string(respBody))
+	respBody, _ := io.ReadAll(resp.Body)
+	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
+	respStr = decodeIfBase64(respStr)
+	if respStr == "" {
+		respStr = "empty response"
 	}
 
-	// 校验返回内容必须包含 ok 或 success
-	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
+	if resp.StatusCode != http.StatusOK {
+		notifyPayoutCallback("warn", "[回调商户-代付] HTTP状态异常", payload, url,
+			fmt.Sprintf("HTTP状态: %d", resp.StatusCode),
+			string(body), respStr)
+		return fmt.Errorf("[CALLBACK-PAYOUT] merchant returned %d: %s", resp.StatusCode, respStr)
+	}
+
+	// 判断响应内容
 	if respStr != "ok" && respStr != "success" {
 		orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 2, payload.Status)
 		if orderErr != nil {
-			return fmt.Errorf("[CALLBACK-PAYOUT] notify merchant order update data failed: %s", respStr)
+			notifyPayoutCallback("warn", "[回调商户-代付] 订单状态更新失败", payload, url, orderErr.Error(), string(body), respStr)
+			return fmt.Errorf("[CALLBACK-PAYOUT] merchant response invalid: %s", respStr)
 		}
-		return fmt.Errorf("[CALLBACK-PAYOUT] merchant response invalid: %s", respStr)
+		notifyPayoutCallback("warn", "[回调商户-代付] 响应无效", payload, url,
+			fmt.Sprintf("返回内容无效: %s", respStr),
+			string(body), respStr)
+		return fmt.Errorf("[CALLBACK-PAYOUT] invalid merchant response: %s", respStr)
 	}
-	orderErr := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status)
-	if orderErr != nil {
-		return fmt.Errorf("[CALLBACK-PAYOUT] notify merchant order update data failed: %s", orderErr)
+
+	// ✅ 回调成功
+	if err := s.payoutUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status); err != nil {
+		notifyPayoutCallback("warn", "[回调商户-代付] 状态更新异常", payload, url, err.Error(), string(body), respStr)
+		return fmt.Errorf("[CALLBACK-PAYOUT] update merchant order failed: %v", err)
 	}
-	log.Printf("[CALLBACK-PAYOUT] 通知下游商户成功,商户: %v 订单号: %v", payload.MerchantNo, payload.TranFlow)
+
+	notifyPayoutCallback("info", "[回调商户-代付] 调用成功", payload, url,
+		"回调状态: Success", string(body), respStr)
+
+	log.Printf("[CALLBACK-PAYOUT] ✅ 通知下游商户成功, 商户: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
 	return nil
 }
 

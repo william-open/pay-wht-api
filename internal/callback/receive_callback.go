@@ -244,7 +244,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 	// 构建 JSON
 	body, err := json.Marshal(payload)
 	if err != nil {
-		notifyMerchantCallback("warn", "[回调商户] 序列化失败", payload, url, err.Error(), utils.MapToJSON(payload), "")
+		notifyMerchantCallback("warn", "[回调商户-代收] 序列化失败", payload, url, err.Error(), utils.MapToJSON(payload), "")
 		return fmt.Errorf("[CALLBACK-RECEIVE] failed to marshal payload: %w", err)
 	}
 
@@ -257,7 +257,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 
 	resp, err := client.Do(req)
 	if err != nil {
-		notifyMerchantCallback("warn", "[回调商户] 请求失败", payload, url, err.Error(), string(body), "")
+		notifyMerchantCallback("warn", "[回调商户-代收] 请求失败", payload, url, err.Error(), string(body), "")
 		return fmt.Errorf("[CALLBACK-RECEIVE] send error: %w", err)
 	}
 	defer resp.Body.Close()
@@ -270,7 +270,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		notifyMerchantCallback("warn", "[回调商户] HTTP状态异常", payload, url,
+		notifyMerchantCallback("warn", "[回调商户-代收] HTTP状态异常", payload, url,
 			fmt.Sprintf("HTTP状态: %d", resp.StatusCode),
 			string(body), respStr)
 		return fmt.Errorf("[CALLBACK-RECEIVE] merchant returned %d: %s", resp.StatusCode, respStr)
@@ -280,11 +280,11 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 	if respStr != "ok" && respStr != "success" {
 		orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 2, payload.Status)
 		if orderErr != nil {
-			notifyMerchantCallback("warn", "[回调商户] 订单状态更新失败", payload, url,
+			notifyMerchantCallback("warn", "[回调商户-代收] 订单状态更新失败", payload, url,
 				orderErr.Error(), string(body), respStr)
 			return fmt.Errorf("[CALLBACK-RECEIVE] merchant response invalid: %s", respStr)
 		}
-		notifyMerchantCallback("warn", "[回调商户] 响应无效", payload, url,
+		notifyMerchantCallback("warn", "[回调商户-代收] 响应无效", payload, url,
 			fmt.Sprintf("返回内容无效: %s", respStr),
 			string(body), respStr)
 		return fmt.Errorf("[CALLBACK-RECEIVE] invalid merchant response: %s", respStr)
@@ -292,11 +292,11 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 
 	// 回调成功
 	if err := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status); err != nil {
-		notifyMerchantCallback("warn", "[回调商户] 状态更新异常", payload, url, err.Error(), string(body), respStr)
+		notifyMerchantCallback("warn", "[回调商户-代收] 状态更新异常", payload, url, err.Error(), string(body), respStr)
 		return fmt.Errorf("[CALLBACK-RECEIVE] update merchant order failed: %v", err)
 	}
 
-	notifyMerchantCallback("info", "[回调商户] 调用成功", payload, url,
+	notifyMerchantCallback("info", "[回调商户-代收] 调用成功", payload, url,
 		"回调状态: Success", string(body), respStr)
 
 	log.Printf("[CALLBACK-RECEIVE] ✅ 通知下游商户成功, 商户号: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
