@@ -2,9 +2,11 @@ package callback
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -181,131 +183,91 @@ func (s *ReceiveCallback) verifyUpstreamWhitelist(upstreamId uint64, ipAddress s
 	return true
 }
 
+// decodeIfBase64 自动检测并解码 Base64 响应
+func decodeIfBase64(s string) string {
+	data, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return s
+	}
+	return string(data)
+}
+
+// notifyMerchantCallback 通用通知封装
+func notifyMerchantCallback(level, title string, payload dto.ReceiveNotifyMerchantPayload, url, desc, req, resp string) {
+	text := fmt.Sprintf(
+		"商户号: %s\n订单号: %s\n回调地址: %s\n描述: %s\n请求参数: %s\n响应参数: %s",
+		payload.MerchantNo,
+		payload.TranFlow,
+		url,
+		desc,
+		req,
+		resp,
+	)
+	notify.Notify(system.BotChatID, level, title, text, true)
+}
+
 // 通知商户并检查响应
+// ReceiveCallback 通知商户并检查响应
 func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveNotifyMerchantPayload) error {
-	// 转 JSON
+	// 构建 JSON
 	body, err := json.Marshal(payload)
 	if err != nil {
-		notify.Notify(
-			system.BotChatID,
-			"warn",
-			"[回调商户] 调用失败",
-			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
-				payload.MerchantNo,
-				payload.TranFlow,
-				url,
-				err.Error(),
-				utils.MapToJSON(payload),
-				utils.MapToJSON(body),
-			),
-			true,
-		)
+		notifyMerchantCallback("warn", "[回调商户] 序列化失败", payload, url, err.Error(), utils.MapToJSON(payload), "")
 		return fmt.Errorf("[CALLBACK-RECEIVE] failed to marshal payload: %w", err)
 	}
+
 	log.Printf("[CALLBACK-RECEIVE] >>回调下游商户参数: %s", string(body))
 
-	// 一定是 POST，并发送 JSON
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
+	// 带超时的 HTTP 客户端
+	client := &http.Client{Timeout: 8 * time.Second}
+	req, _ := http.NewRequestWithContext(context.Background(), "POST", url, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
-		notify.Notify(
-			system.BotChatID,
-			"warn",
-			"[回调商户] 调用失败",
-			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
-				payload.MerchantNo,
-				payload.TranFlow,
-				url,
-				err.Error(),
-				utils.MapToJSON(payload),
-				utils.MapToJSON(body),
-			),
-			true,
-		)
-		return fmt.Errorf("[CALLBACK-RECEIVE] failed to send notification: %w", err)
+		notifyMerchantCallback("warn", "[回调商户] 请求失败", payload, url, err.Error(), string(body), "")
+		return fmt.Errorf("[CALLBACK-RECEIVE] send error: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		notify.Notify(
-			system.BotChatID,
-			"warn",
-			"[回调商户] 调用失败",
-			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\nHTTP状态: %+v\n请求参数: %s\n响应参数: %s",
-				payload.MerchantNo,
-				payload.TranFlow,
-				url,
-				resp.StatusCode,
-				utils.MapToJSON(payload),
-				utils.MapToJSON(respBody),
-			),
-			true,
-		)
-		return fmt.Errorf("[CALLBACK-RECEIVE] notification failed with status: %d, body: %s", resp.StatusCode, string(respBody))
+	respBody, _ := io.ReadAll(resp.Body)
+	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
+	respStr = decodeIfBase64(respStr)
+	if respStr == "" {
+		respStr = "empty response"
 	}
 
-	// 校验返回内容必须包含 ok 或 success
-	respStr := strings.ToLower(strings.TrimSpace(string(respBody)))
+	if resp.StatusCode != http.StatusOK {
+		notifyMerchantCallback("warn", "[回调商户] HTTP状态异常", payload, url,
+			fmt.Sprintf("HTTP状态: %d", resp.StatusCode),
+			string(body), respStr)
+		return fmt.Errorf("[CALLBACK-RECEIVE] merchant returned %d: %s", resp.StatusCode, respStr)
+	}
+
+	// 判断响应内容
 	if respStr != "ok" && respStr != "success" {
 		orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 2, payload.Status)
 		if orderErr != nil {
-			notify.Notify(
-				system.BotChatID,
-				"warn",
-				"[回调商户] 调用失败",
-				fmt.Sprintf(
-					"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %+v\n请求参数: %s\n响应参数: %s",
-					payload.MerchantNo,
-					payload.TranFlow,
-					url,
-					resp.StatusCode,
-					utils.MapToJSON(payload),
-					respStr,
-				),
-				true,
-			)
-			return fmt.Errorf("[CALLBACK-RECEIVE] notify merchant order update data failed: %s", respStr)
+			notifyMerchantCallback("warn", "[回调商户] 订单状态更新失败", payload, url,
+				orderErr.Error(), string(body), respStr)
+			return fmt.Errorf("[CALLBACK-RECEIVE] merchant response invalid: %s", respStr)
 		}
-		notify.Notify(
-			system.BotChatID,
-			"warn",
-			"[回调商户] 调用失败",
-			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %+v\n请求参数: %s\n响应参数: %s",
-				payload.MerchantNo,
-				payload.TranFlow,
-				url,
-				resp.StatusCode,
-				utils.MapToJSON(payload),
-				respStr,
-			),
-			true,
-		)
-		return fmt.Errorf("[CALLBACK-RECEIVE] merchant response invalid: %s", respStr)
+		notifyMerchantCallback("warn", "[回调商户] 响应无效", payload, url,
+			fmt.Sprintf("返回内容无效: %s", respStr),
+			string(body), respStr)
+		return fmt.Errorf("[CALLBACK-RECEIVE] invalid merchant response: %s", respStr)
 	}
-	orderErr := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status)
-	if orderErr != nil {
-		return fmt.Errorf("[CALLBACK-RECEIVE] notify merchant order update data failed: %s", orderErr)
+
+	// 回调成功
+	if err := s.receiveUpdateMerchantOrder(payload.PaySerialNo, 1, payload.Status); err != nil {
+		notifyMerchantCallback("warn", "[回调商户] 状态更新异常", payload, url, err.Error(), string(body), respStr)
+		return fmt.Errorf("[CALLBACK-RECEIVE] update merchant order failed: %v", err)
 	}
-	notify.Notify(
-		system.BotChatID,
-		"info",
-		"[回调商户] 调用成功",
-		fmt.Sprintf(
-			"商户号: %s\n订单号: %s\n回调状态: Success\n回调地址: %s\n请求参数: %s\n响应参数: %s",
-			payload.MerchantNo,
-			payload.TranFlow,
-			url,
-			utils.MapToJSON(payload),
-			respStr,
-		),
-		true,
-	)
-	log.Printf("[CALLBACK-RECEIVE] 通知下游商户成功,商户: %v 订单号: %v", payload.MerchantNo, payload.TranFlow)
+
+	notifyMerchantCallback("info", "[回调商户] 调用成功", payload, url,
+		"回调状态: Success", string(body), respStr)
+
+	log.Printf("[CALLBACK-RECEIVE] ✅ 通知下游商户成功, 商户号: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
 	return nil
 }
 
