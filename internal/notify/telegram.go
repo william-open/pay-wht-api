@@ -76,6 +76,31 @@ func buildHTTPClient() *http.Client {
 	}
 }
 
+func EscapeMarkdownV2(text string) string {
+	// 按照 Telegram 官方要求转义所有特殊字符
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"`", "\\`",
+		">", "\\>",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-", // ✅ 转义 '-'
+		"=", "\\=",
+		"|", "\\|",
+		"{", "\\{",
+		"}", "\\}",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
+}
+
 // ================= 基础发送函数 =================
 
 // SendTelegramMessage 同步发送（带重试机制）
@@ -86,7 +111,7 @@ func SendTelegramMessage(chatID, content string) error {
 
 	msg := TelegramMessage{
 		ChatID: chatID,
-		Text:   content,
+		Text:   EscapeMarkdownV2(content),
 		Parse:  "MarkdownV2",
 	}
 
