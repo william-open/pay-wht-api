@@ -42,16 +42,22 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	// 转成 uint64
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
 	if err != nil {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ 平台对接上游的商户订单号,转换失败: %v", err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] 平台对接上游的商户订单号,转换失败: %v", err)
 	}
 	txTable := shard.UpOrderShard.GetTable(mOrderIdNum, time.Now())
 
 	var upOrder orderModel.UpstreamTx
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ tx order not found with MOrderID %v: %+v", mOrderIdNum, err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] tx order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
 	// 验证上游供应商IP
 	if !verifyUpstreamWhitelist(upOrder.SupplierId, msg.UpIpAddress) {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ the upstream supplier IP is not in the whitelist. MOrderID:%v, upstreamId:%v, ipAddress:%s", mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] the upstream supplier IP is not in the whitelist. MOrderID:%v, upstreamId:%v, ipAddress:%s", mOrderIdNum, upOrder.SupplierId, msg.UpIpAddress)
 	}
 	// 更新上游订单状态
@@ -59,30 +65,42 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	upOrder.UpOrderNo = msg.UpOrderID
 	upOrder.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ update up_order not found with MOrderID %v: %+v", mOrderIdNum, err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] update up_order not found with MOrderID %v: %w", mOrderIdNum, err)
 	}
 	// 判断一下交易金额是否正确
 	if msg.Amount.Cmp(upOrder.Amount) != 0 {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ incorrect transaction amount with MOrderID %v: callback amount:%v:up order amount:%v", mOrderIdNum, msg.Amount, upOrder.Amount), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] incorrect transaction amount with MOrderID %v: callback amount:%v:up order amount:%v", mOrderIdNum, msg.Amount, upOrder.Amount)
 	}
 	// 根据商户订单号查找订单
 	var order orderModel.MerchantOrder
 	orderTable := shard.OrderShard.GetTable(upOrder.OrderID, time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️  merchant order not found with MOrderID %v: %+v", upOrder.OrderID, err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] merchant order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
 	// 如果商户订单status状态>1,表示已经收到上游回调处理
 	if order.Status > 1 {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️  upstream callback merchant order,  have handled with MOrderID %v,order status is: %v", upOrder.OrderID, order.Status), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] upstream callback merchant order,  have handled with MOrderID %v,order status is: %v", upOrder.OrderID, order.Status)
 	}
 	// 判断一下交易金额是否正确
 	if msg.Amount.Cmp(order.Amount) != 0 {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ incorrect transaction amount with MOrderID %v: callback amount:%v:order amount:%v", mOrderIdNum, msg.Amount, order.Amount), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] incorrect transaction amount with MOrderID %v: callback amount:%v:order amount:%v", mOrderIdNum, msg.Amount, order.Amount)
 	}
 	order.Status = s.receiveGetUpStatusMessage(msg.Status)
 	order.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).Updates(&order).Error; err != nil {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️ update order not found with MOrderID %v: %+v", upOrder.OrderID, err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] update order not found with MOrderID %v: %w", upOrder.OrderID, err)
 	}
 
@@ -90,6 +108,8 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	mainDao = dao.NewMainDao()
 	merchant, err := mainDao.GetMerchantId(upOrder.MerchantID)
 	if err != nil || merchant == nil || merchant.Status != 1 {
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️  merchant not found or inactive: %v", err), true)
 		return fmt.Errorf("[CALLBACK-RECEIVE] merchant not found or inactive: %v", err)
 	}
 
@@ -100,6 +120,8 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
 		err := settleService.DoPaySettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
 		if err != nil {
+			notify.Notify(system.BotChatID, "warn", "代收回调商户",
+				fmt.Sprintf("⚠️ order %v, settlement  failed err: %v", order.OrderID, err), true)
 			return fmt.Errorf("[CALLBACK-RECEIVE] settlement  failed err: %v", err)
 		}
 
@@ -107,6 +129,8 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 		go func() {
 			country, cErr := mainDao.GetCountry(order.Currency)
 			if cErr != nil {
+				notify.Notify(system.BotChatID, "warn", "代收回调商户",
+					fmt.Sprintf("⚠️ order %v, 获取国家信息异常: %v", order.OrderID, cErr), true)
 				log.Printf("获取国家信息异常: %v", cErr)
 			}
 			err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
@@ -125,6 +149,8 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 				CreateTime: time.Now(),
 			})
 			if err != nil {
+				notify.Notify(system.BotChatID, "warn", "代收回调商户",
+					fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", order.OrderID, err), true)
 				return
 			}
 		}()
@@ -148,12 +174,18 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	for i := 1; i <= receiveMaxRetry; i++ {
 		lastErr = s.receiveNotifyMerchant(order.NotifyURL, payload)
 		if lastErr == nil {
+			notify.Notify(system.BotChatID, "warn", "代收回调商户",
+				fmt.Sprintf("⚠️[CALLBACK-RECEIVE]Successfully notified merchant for order: %s (try %d)", msg.MOrderID, i), true)
 			log.Printf("✅ [CALLBACK-RECEIVE]Successfully notified merchant for order: %s (try %d)", msg.MOrderID, i)
 			return nil
 		}
+		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+			fmt.Sprintf("⚠️[CALLBACK-RECEIVE]Notify merchant failed (try %d/%d): %v", i, receiveMaxRetry, lastErr), true)
 		log.Printf("⚠️ [CALLBACK-RECEIVE]Notify merchant failed (try %d/%d): %v", i, receiveMaxRetry, lastErr)
 		time.Sleep(time.Duration(i*2) * time.Second)
 	}
+	notify.Notify(system.BotChatID, "warn", "代收回调商户",
+		fmt.Sprintf("⚠️[CALLBACK-RECEIVE]failed to notify merchant %v after %d retries: %v", payload.MerchantNo, receiveMaxRetry, lastErr), true)
 	return fmt.Errorf("[CALLBACK-RECEIVE]failed to notify merchant %v after %d retries: %v", payload.MerchantNo, receiveMaxRetry, lastErr)
 }
 
