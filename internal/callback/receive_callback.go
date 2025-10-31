@@ -213,13 +213,13 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 			"warn",
 			"[回调商户] 调用失败",
 			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
+				"商户号: %s\n订单号: %s\n回调状态: Failed\n回调地址: %s\n错误描述: %s\n请求参数: %s\n响应参数: %+v",
 				payload.MerchantNo,
 				payload.TranFlow,
 				url,
 				err.Error(),
 				utils.MapToJSON(payload),
-				utils.MapToJSON(body),
+				resp,
 			),
 			true,
 		)
@@ -241,7 +241,7 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 				url,
 				resp.StatusCode,
 				utils.MapToJSON(payload),
-				utils.MapToJSON(respBody),
+				string(respBody),
 			),
 			true,
 		)
