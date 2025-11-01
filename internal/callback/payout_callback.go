@@ -192,8 +192,6 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	for i := 1; i <= payoutMaxRetry; i++ {
 		lastErr = s.payoutNotifyMerchant(order.NotifyURL, payload)
 		if lastErr == nil {
-			notify.Notify(system.BotChatID, "warn", "代付回调商户",
-				fmt.Sprintf("⚠️   已成功通知商户 OrderID=%v (第%d次)", order.OrderID, i), true)
 			log.Printf("✅ [CALLBACK-PAYOUT] 已成功通知商户 OrderID=%v (第%d次)", order.OrderID, i)
 			return nil
 		}
@@ -282,7 +280,7 @@ func (s *PayoutCallback) payoutNotifyMerchant(url string, payload dto.PayoutNoti
 		return fmt.Errorf("[CALLBACK-PAYOUT] update merchant order failed: %v", err)
 	}
 
-	notifyPayoutCallback("info", "[回调商户-代付] 调用成功", payload, url,
+	notifyPayoutCallback("info", "[回调商户-代付] 通知成功", payload, url,
 		"回调状态: Success", string(body), respStr)
 
 	log.Printf("[CALLBACK-PAYOUT] ✅ 通知下游商户成功, 商户: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
