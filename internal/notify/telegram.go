@@ -77,7 +77,6 @@ func buildHTTPClient() *http.Client {
 }
 
 func EscapeMarkdownV2(text string) string {
-	// 按照 Telegram 官方要求转义所有特殊字符
 	replacer := strings.NewReplacer(
 		"_", "\\_",
 		"*", "\\*",
@@ -90,13 +89,15 @@ func EscapeMarkdownV2(text string) string {
 		">", "\\>",
 		"#", "\\#",
 		"+", "\\+",
-		"-", "\\-", // ✅ 转义 '-'
+		"-", "\\-",
 		"=", "\\=",
 		"|", "\\|",
 		"{", "\\{",
 		"}", "\\}",
 		".", "\\.",
 		"!", "\\!",
+		"<", "\\<", // ✅ 新增：< 也需转义（HTML 符号冲突）
+		"&", "\\&", // ✅ 新增：防止 HTML 解析干扰
 	)
 	return replacer.Replace(text)
 }
