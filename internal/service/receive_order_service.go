@@ -45,7 +45,7 @@ type ReceiveOrderService struct {
 	pub           event.Publisher
 }
 
-func NewReceiveOrderService() *ReceiveOrderService {
+func NewReceiveOrderService(pub event.Publisher) *ReceiveOrderService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReceiveOrderService{
 		mainDao:       dao.NewMainDao(),
@@ -53,6 +53,7 @@ func NewReceiveOrderService() *ReceiveOrderService {
 		indexTableDao: dao.NewIndexTableDao(),
 		ctx:           ctx,
 		cancel:        cancel,
+		pub:           pub, // 注入
 	}
 }
 
@@ -275,36 +276,51 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 12 异步事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 	// 13) 异步处理统计数据
-	go func() {
-		country, cErr := s.mainDao.GetCountry(order.Currency)
+	go func(ord *ordermodel.MerchantOrder) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[order_stat panic recovered] %v\n%s", r, debug.Stack())
+			}
+		}()
+
+		// ① 先拿 country，注意判空
+		country, cErr := s.mainDao.GetCountry(ord.Currency)
 		if cErr != nil {
-			notify.Notify(system.BotChatID, "warn", "代收回调商户",
-				fmt.Sprintf("⚠️ order %v, 获取国家信息异常: %v", order.OrderID, cErr), true)
-			log.Printf("获取国家信息异常: %v", cErr)
+			notify.Notify(system.BotChatID, "warn", "代收下单统计",
+				fmt.Sprintf("⚠️ order %v, 获取国家信息异常: err=%v country=%v", ord.OrderID, cErr, country), true)
+			return
 		}
-		err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
-			OrderID:       strconv.FormatUint(order.OrderID, 10),
-			MerchantID:    order.MID,
+
+		// ② publisher 可能没初始化，判空
+		if s.pub == nil {
+			log.Printf("[order_stat] publisher is nil, skip publish. order=%v", ord.OrderID)
+			return
+		}
+
+		msg := &dto.OrderMessageMQ{
+			OrderID:       strconv.FormatUint(ord.OrderID, 10),
+			MerchantID:    ord.MID,
 			CountryID:     country.ID,
-			ChannelID:     order.ChannelID,
-			SupplierID:    order.SupplierID,
-			Amount:        order.Amount,
+			ChannelID:     ord.ChannelID,
+			SupplierID:    ord.SupplierID,
+			Amount:        ord.Amount,
 			SuccessAmount: decimal.Zero,
 			Profit:        decimal.Zero,
 			Cost:          decimal.Zero,
 			Fee:           decimal.Zero,
 			Status:        1,
 			OrderType:     "collect",
-			Currency:      order.Currency,
+			Currency:      ord.Currency,
 			CreateTime:    time.Now(),
-		})
-		if err != nil {
+		}
+
+		if err := s.pub.Publish("order_stat", msg); err != nil {
 			notify.Notify(system.BotChatID, "warn", "代收下单统计",
-				fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", order.OrderID, err), true)
+				fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", ord.OrderID, err), true)
 			return
 		}
-		fmt.Printf("⚠️ order %v, 下单统计数据入列成功", order.OrderID)
-	}()
+		log.Printf("[order_stat] 入列成功, order=%v", ord.OrderID)
+	}(order) // 显式传参，避免闭包误用/未来被改
 
 	return resp, nil
 }

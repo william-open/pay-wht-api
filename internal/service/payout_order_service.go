@@ -48,7 +48,7 @@ type PayoutOrderService struct {
 	pub             event.Publisher
 }
 
-func NewPayoutOrderService() *PayoutOrderService {
+func NewPayoutOrderService(pub event.Publisher) *PayoutOrderService {
 	ctx, cancel := context.WithCancel(context.Background())
 	service := &PayoutOrderService{
 		mainDao:       dao.NewMainDao(),        // 使用工厂方法
@@ -57,6 +57,7 @@ func NewPayoutOrderService() *PayoutOrderService {
 		ctx:           ctx,
 		cancel:        cancel,
 		isHealthy:     false,
+		pub:           pub, // 注入
 	}
 
 	// 初始化时进行健康检查
@@ -301,34 +302,61 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 
 	// 14) 异步处理统计数据
-	go func() {
-		country, cErr := s.mainDao.GetCountry(order.Currency)
+	go func(ord *ordermodel.MerchantPayOutOrderM) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Panic-Recovered] 异步统计 goroutine panic: %v\n%s", r, debug.Stack())
+				notify.Notify(system.BotChatID, "error", "异步统计 Panic",
+					fmt.Sprintf("🚨 异步统计 goroutine panic: %v", r), true)
+			}
+		}()
+
+		// 1️⃣ 获取国家信息
+		country, cErr := s.mainDao.GetCountry(ord.Currency)
 		if cErr != nil {
+			log.Printf("[order_stat] 获取国家信息异常: %v, country=%v", cErr, country)
 			notify.Notify(system.BotChatID, "warn", "代付下单",
-				fmt.Sprintf("⚠️  获取国家信息异常: %v", cErr), true)
-			log.Printf("获取国家信息异常: %v", cErr)
+				fmt.Sprintf("⚠️ 获取国家信息异常: %v", cErr), true)
+			// 直接返回，不继续往下执行
+			return
 		}
-		if err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
-			OrderID:       strconv.FormatUint(order.OrderID, 10),
-			MerchantID:    order.MID,
+
+		// 2️⃣ 检查 Publisher 是否存在
+		if s.pub == nil {
+			log.Printf("[order_stat] Publisher 未初始化，跳过发布。OrderID=%v", ord.OrderID)
+			notify.Notify(system.BotChatID, "warn", "代付下单",
+				fmt.Sprintf("⚠️ Publisher 未初始化，跳过发布 OrderID=%v", ord.OrderID), true)
+			return
+		}
+
+		// 3️⃣ 构造消息并发布
+		msg := &dto.OrderMessageMQ{
+			OrderID:       strconv.FormatUint(ord.OrderID, 10),
+			MerchantID:    ord.MID,
 			CountryID:     country.ID,
-			ChannelID:     order.ChannelID,
-			SupplierID:    order.SupplierID,
-			Amount:        order.Amount,
+			ChannelID:     ord.ChannelID,
+			SupplierID:    ord.SupplierID,
+			Amount:        ord.Amount,
 			SuccessAmount: decimal.Zero,
 			Profit:        decimal.Zero,
 			Cost:          decimal.Zero,
 			Fee:           decimal.Zero,
 			Status:        1,
 			OrderType:     "payout",
-			Currency:      order.Currency,
+			Currency:      ord.Currency,
 			CreateTime:    time.Now(),
-		}); err != nil {
-			notify.Notify(system.BotChatID, "warn", "代付下单",
-				fmt.Sprintf("⚠️  发布订单统计失败 OrderID=%v: %v", order.OrderID, err), true)
-			log.Printf("发布订单统计失败 OrderID=%v: %v", order.OrderID, err)
 		}
-	}()
+
+		if err := s.pub.Publish("order_stat", msg); err != nil {
+			log.Printf("[order_stat] 发布订单统计失败 OrderID=%v: %v", ord.OrderID, err)
+			notify.Notify(system.BotChatID, "warn", "代付下单",
+				fmt.Sprintf("⚠️ 发布订单统计失败 OrderID=%v: %v", ord.OrderID, err), true)
+			return
+		}
+
+		log.Printf("[order_stat] ✅ 订单统计入列成功 OrderID=%v", ord.OrderID)
+	}(order)
+
 	return resp, nil
 }
 
@@ -1107,16 +1135,4 @@ func (s *PayoutOrderService) IsHealthy() bool {
 	s.healthCheckLock.RLock()
 	defer s.healthCheckLock.RUnlock()
 	return s.isHealthy
-}
-
-// InitializePayoutService 初始化支付服务
-func InitializePayoutService() (*PayoutOrderService, error) {
-	service := NewPayoutOrderService()
-
-	if !service.IsHealthy() {
-		return nil, errors.New("service health check failed")
-	}
-
-	log.Println("PayoutOrderService 初始化成功")
-	return service, nil
 }

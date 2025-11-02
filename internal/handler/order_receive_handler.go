@@ -9,6 +9,7 @@ import (
 	"time"
 	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/mq"
 	"wht-order-api/internal/service"
 	"wht-order-api/internal/utils"
 )
@@ -17,7 +18,9 @@ import (
 type ReceiveOrderHandler struct{ svc *service.ReceiveOrderService }
 
 func NewReceiveOrderHandler() *ReceiveOrderHandler {
-	return &ReceiveOrderHandler{svc: service.NewReceiveOrderService()}
+	// 创建 Publisher 实例
+	pub := mq.NewPublisher()
+	return &ReceiveOrderHandler{svc: service.NewReceiveOrderService(pub)}
 }
 
 // ReceiveOrderCreate 代收订单创建

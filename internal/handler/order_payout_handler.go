@@ -9,6 +9,7 @@ import (
 	"time"
 	"wht-order-api/internal/constant"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/mq"
 	"wht-order-api/internal/service"
 	"wht-order-api/internal/utils"
 )
@@ -17,7 +18,9 @@ import (
 type PayoutOrderPayoutHandler struct{ svc *service.PayoutOrderService }
 
 func NewPayoutOrderHandler() *PayoutOrderPayoutHandler {
-	return &PayoutOrderPayoutHandler{svc: service.NewPayoutOrderService()}
+	// 创建 Publisher 实例
+	pub := mq.NewPublisher()
+	return &PayoutOrderPayoutHandler{svc: service.NewPayoutOrderService(pub)}
 }
 
 // PayoutOrderCreate 代付订单创建
