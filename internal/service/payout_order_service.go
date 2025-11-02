@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 	"wht-order-api/internal/channel/health"
+	"wht-order-api/internal/event"
 	mainmodel "wht-order-api/internal/model/main"
 	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
@@ -44,6 +45,7 @@ type PayoutOrderService struct {
 	healthCheckLock sync.RWMutex
 	lastHealthCheck time.Time
 	isHealthy       bool
+	pub             event.Publisher
 }
 
 func NewPayoutOrderService() *PayoutOrderService {
@@ -297,6 +299,36 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 
 	// 13 异步事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
+
+	// 14) 异步处理统计数据
+	go func() {
+		country, cErr := s.mainDao.GetCountry(order.Currency)
+		if cErr != nil {
+			notify.Notify(system.BotChatID, "warn", "代付下单",
+				fmt.Sprintf("⚠️  获取国家信息异常: %v", cErr), true)
+			log.Printf("获取国家信息异常: %v", cErr)
+		}
+		if err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
+			OrderID:       strconv.FormatUint(order.OrderID, 10),
+			MerchantID:    order.MID,
+			CountryID:     country.ID,
+			ChannelID:     order.ChannelID,
+			SupplierID:    order.SupplierID,
+			Amount:        order.Amount,
+			SuccessAmount: decimal.Zero,
+			Profit:        decimal.Zero,
+			Cost:          decimal.Zero,
+			Fee:           decimal.Zero,
+			Status:        1,
+			OrderType:     "payout",
+			Currency:      order.Currency,
+			CreateTime:    time.Now(),
+		}); err != nil {
+			notify.Notify(system.BotChatID, "warn", "代付下单",
+				fmt.Sprintf("⚠️  发布订单统计失败 OrderID=%v: %v", order.OrderID, err), true)
+			log.Printf("发布订单统计失败 OrderID=%v: %v", order.OrderID, err)
+		}
+	}()
 	return resp, nil
 }
 

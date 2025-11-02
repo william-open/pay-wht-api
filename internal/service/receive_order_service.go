@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"wht-order-api/internal/event"
 	"wht-order-api/internal/notify"
 	"wht-order-api/internal/shard"
 	"wht-order-api/internal/system"
@@ -41,6 +42,7 @@ type ReceiveOrderService struct {
 	channelGroup  singleflight.Group
 	ctx           context.Context
 	cancel        context.CancelFunc
+	pub           event.Publisher
 }
 
 func NewReceiveOrderService() *ReceiveOrderService {
@@ -272,6 +274,37 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 
 	// 12 异步事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
+	// 13) 异步处理统计数据
+	go func() {
+		country, cErr := s.mainDao.GetCountry(order.Currency)
+		if cErr != nil {
+			notify.Notify(system.BotChatID, "warn", "代收回调商户",
+				fmt.Sprintf("⚠️ order %v, 获取国家信息异常: %v", order.OrderID, cErr), true)
+			log.Printf("获取国家信息异常: %v", cErr)
+		}
+		err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
+			OrderID:       strconv.FormatUint(order.OrderID, 10),
+			MerchantID:    order.MID,
+			CountryID:     country.ID,
+			ChannelID:     order.ChannelID,
+			SupplierID:    order.SupplierID,
+			Amount:        order.Amount,
+			SuccessAmount: decimal.Zero,
+			Profit:        decimal.Zero,
+			Cost:          decimal.Zero,
+			Fee:           decimal.Zero,
+			Status:        1,
+			OrderType:     "collect",
+			Currency:      order.Currency,
+			CreateTime:    time.Now(),
+		})
+		if err != nil {
+			notify.Notify(system.BotChatID, "warn", "代收下单统计",
+				fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", order.OrderID, err), true)
+			return
+		}
+	}()
+
 	return resp, nil
 }
 
