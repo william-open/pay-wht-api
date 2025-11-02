@@ -303,6 +303,7 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 				fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", order.OrderID, err), true)
 			return
 		}
+		fmt.Printf("⚠️ order %v, 下单统计数据入列成功", order.OrderID)
 	}()
 
 	return resp, nil
