@@ -236,35 +236,60 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		return resp, err
 	}
 
-	// 11 调用上游（失败降级）
+	// 11 调用上游（失败降级 + 成功后更新绑定信息 + settle_snapshot）
 	var lastErr error
 	for _, product := range products {
+		log.Printf("[代付上游调用尝试] 商户号=%s, 通道=%s/%s, 上游ID=%d",
+			req.MerchantNo, product.SysChannelCode, product.UpstreamCode, product.UpstreamId)
+
+		// 调用上游接口
 		_, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId, order)
 		if err == nil {
+			// ✅ 调用成功逻辑
 			s.clearUpstreamFail(uint64(product.UpstreamId))
 			lastErr = nil
-			// 更新成功率（异步）
+
+			// ✅ 异步更新绑定（通道、费率、settle_snapshot）
+			go func(p dto.PayProductVo) {
+				if e := s.updatePayoutOrderBindOnSuccess(order, tx, merchant, p, amount, now); e != nil {
+					log.Printf("[WARN] 代付订单绑定更新失败 order=%d err=%v", order.OrderID, e)
+					notify.Notify(system.BotChatID, "warn", "代付订单通道绑定更新失败",
+						fmt.Sprintf("订单号: %d\n通道: %s/%s\n错误: %v",
+							order.OrderID, p.SysChannelCode, p.UpstreamCode, e), true)
+				}
+			}(product)
+
+			// ✅ 更新通道成功率
 			go func(pid int64) {
 				if e := s.mainDao.UpdateSuccessRate(pid, true); e != nil {
 					log.Printf("update channel success rate failed: %v", e)
 				}
 			}(product.ID)
+
+			log.Printf("[代付上游调用成功] 商户号=%s, 通道=%s/%s, 上游ID=%d, 订单ID=%d",
+				req.MerchantNo, product.SysChannelCode, product.UpstreamCode, product.UpstreamId, order.OrderID)
 			break
 		}
 
-		// 更新通道成功率（异步）
+		// ❌ 调用失败逻辑
+		lastErr = err
+		log.Printf("[代付上游调用失败] 商户号=%s, 通道=%s/%s, 上游ID=%d, 错误=%v",
+			req.MerchantNo, product.SysChannelCode, product.UpstreamCode, product.UpstreamId, err)
+
+		// 更新通道成功率（异步标记失败）
 		go func(pid int64) {
 			if e := s.mainDao.UpdateSuccessRate(pid, false); e != nil {
-				log.Printf("update channel success rate failed: %v", e)
+				log.Printf("update channel fail rate failed: %v", e)
 			}
 		}(product.ID)
 
 		// 记录失败计数
 		s.recordUpstreamFail(uint64(product.UpstreamId))
 
-		// ⚠️ 每次失败后都发 Telegram
+		// ⚠️ Telegram 通知
 		notify.Notify(system.BotChatID, "warn", "代付上游调用失败",
-			fmt.Sprintf("\n商户号: %s\n通道编码: %s\n上游通道: %s\n上游接口: %s\n供应商: %s\n订单号: %s\n失败原因: %v\n商户请求参数: %s",
+			fmt.Sprintf(
+				"商户号: %s\n通道编码: %s\n上游通道: %s\n接口: %s\n供应商: %s\n订单号: %s\n失败原因: %v\n商户请求参数: %s",
 				req.MerchantNo,
 				req.PayType,
 				product.UpChannelTitle,
@@ -274,15 +299,16 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 				err,
 				utils.MapToJSON(req),
 			), true)
-
-		lastErr = err
 	}
 
+	// ❌ 所有上游均失败
 	if lastErr != nil {
 		resp = dto.CreatePayoutOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
-			TranFlow:    req.TranFlow, SysTime: time.Now().Format(time.RFC3339),
-			Amount: req.Amount, Code: "001",
+			TranFlow:    req.TranFlow,
+			SysTime:     time.Now().Format(time.RFC3339),
+			Amount:      req.Amount,
+			Code:        "001",
 		}
 		return resp, lastErr
 	}
@@ -298,6 +324,80 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	// 13 异步事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 	return resp, nil
+}
+
+// updatePayoutOrderBindOnSuccess 成功后更新订单绑定、费率、成本、利润、settle_snapshot
+func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
+	order *ordermodel.MerchantPayOutOrderM,
+	upTx *ordermodel.PayoutUpstreamTxM,
+	merchant *mainmodel.Merchant,
+	product dto.PayProductVo,
+	amount decimal.Decimal,
+	now time.Time,
+) error {
+	// 1️⃣ 重新计算结算信息
+	settle, err := s.calculateSettlement(merchant, product, amount)
+	if err != nil {
+		return fmt.Errorf("recalculate payout settlement failed: %w", err)
+	}
+
+	// 2️⃣ 重新计算费用结构
+	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100)).Add(product.CostFee)
+	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100))
+	profitFee := orderFee.Sub(costFee)
+	orderFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
+
+	// 3️⃣ 拷贝结算快照
+	var orderSettle dto.SettlementResult
+	if err := copier.Copy(&orderSettle, &settle); err != nil {
+		return fmt.Errorf("copy payout settlement snapshot failed: %w", err)
+	}
+
+	// 4️⃣ 更新订单表
+	orderTable := shard.OutOrderShard.GetTable(order.OrderID, now)
+	updateOrder := map[string]interface{}{
+		"supplier_id":      product.UpstreamId,
+		"channel_id":       product.SysChannelID,
+		"up_channel_id":    product.ID,
+		"channel_code":     product.SysChannelCode,
+		"channel_title":    product.SysChannelTitle,
+		"up_channel_code":  product.UpstreamCode,
+		"up_channel_title": product.UpChannelTitle,
+		"m_rate":           product.MDefaultRate,
+		"up_rate":          product.CostRate,
+		"m_fixed_fee":      product.MSingleFee,
+		"up_fixed_fee":     product.CostFee,
+		"fees":             settle.MerchantTotalFee,
+		"country":          product.Country,
+		"cost":             costFee,
+		"profit":           profitFee,
+		"freeze_amount":    orderFreezeAmount,
+		"settle_snapshot":  ordermodel.PayoutSettleSnapshot(orderSettle),
+		"update_time":      now,
+	}
+
+	if err := dal.OrderDB.Table(orderTable).
+		Where("order_id = ?", order.OrderID).
+		Updates(updateOrder).Error; err != nil {
+		return fmt.Errorf("update payout order bind failed: %w", err)
+	}
+
+	// 5️⃣ 更新上游交易表
+	if upTx != nil {
+		txTable := shard.UpOutOrderShard.GetTable(upTx.UpOrderId, now)
+		updateTx := map[string]interface{}{
+			"supplier_id": product.UpstreamId,
+			"currency":    product.Currency,
+			"update_time": now,
+		}
+		if err := dal.OrderDB.Table(txTable).
+			Where("order_id = ? AND up_order_id = ?", upTx.OrderID, upTx.UpOrderId).
+			Updates(updateTx).Error; err != nil {
+			return fmt.Errorf("update payout upstream tx failed: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // asyncPostOrderCreation 异步处理订单创建后的操作
