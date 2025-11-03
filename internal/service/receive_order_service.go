@@ -203,7 +203,18 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	for _, product := range products {
 		payUrl, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId)
 		if err == nil {
+			// 清理失败计数
 			s.clearUpstreamFail(uint64(product.UpstreamId))
+
+			// ✅ 成功后异步更新「订单与上游交易」的通道绑定信息（按实际成功的 product）
+			go func(p dto.PayProductVo) {
+				if e := s.updateOrderBindOnSuccess(order, tx, merchant, p, amount, now); e != nil {
+					log.Printf("update order binding after success failed: %v", e)
+					notify.Notify(system.BotChatID, "warn", "订单绑定更新失败",
+						fmt.Sprintf("订单号: %d, 通道: %s/%s, 错误: %v", order.OrderID, p.SysChannelCode, p.UpstreamCode, e), true)
+				}
+			}(product)
+
 			// 更新成功率（异步）
 			go func(pid int64) {
 				if e := s.mainDao.UpdateSuccessRate(pid, true); e != nil {
@@ -213,28 +224,19 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 			break
 		}
 
-		// 更新通道成功率（异步）
+		// 失败：更新成功率（异步）
 		go func(pid int64) {
 			if e := s.mainDao.UpdateSuccessRate(pid, false); e != nil {
 				log.Printf("update channel success rate failed: %v", e)
 			}
 		}(product.ID)
 
-		// 记录失败计数
+		// 记录失败计数 + 告警
 		s.recordUpstreamFail(uint64(product.UpstreamId))
-
-		// ⚠️ 每次失败后都发 Telegram
 		notify.Notify(system.BotChatID, "warn", "代收上游调用失败",
 			fmt.Sprintf("\n商户号: %s\n通道编码: %s\n上游通道: %s\n上游接口: %s\n供应商: %s\n订单号: %s\n失败原因: %v\n商户请求参数: %s",
-				req.MerchantNo,
-				req.PayType,
-				product.UpChannelTitle,
-				product.InterfaceCode,
-				product.UpstreamTitle,
-				req.TranFlow,
-				err,
-				utils.MapToJSON(req),
-			), true)
+				req.MerchantNo, req.PayType, product.UpChannelTitle, product.InterfaceCode,
+				product.UpstreamTitle, req.TranFlow, err, utils.MapToJSON(req)), true)
 
 		lastErr = err
 	}
@@ -273,6 +275,80 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	// 12 异步事件
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
 	return resp, nil
+}
+
+// updateOrderBindOnSuccess 成功后将订单与实际成功的通道产品进行绑定，并重新计算费用/利润
+// updateOrderBindOnSuccess 成功后将订单与实际成功的通道产品进行绑定，并重新计算费用/利润/快照
+func (s *ReceiveOrderService) updateOrderBindOnSuccess(
+	order *ordermodel.MerchantOrder,
+	upTx *ordermodel.UpstreamTx,
+	merchant *mainmodel.Merchant,
+	product dto.PayProductVo,
+	amount decimal.Decimal,
+	now time.Time,
+) error {
+	// 重新计算结算（包含代理信息、商户费率、成本费率等）
+	settle, err := s.calculateSettlement(merchant, product, amount)
+	if err != nil {
+		return fmt.Errorf("recalculate settlement failed: %w", err)
+	}
+
+	// 成本与利润重算（与 createOrder 一致的口径）
+	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100))
+	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100))
+	profitFee := orderFee.Sub(costFee)
+
+	// 拷贝结算快照结构（防止修改引用）
+	var orderSettle dto.SettlementResult
+	if err := copier.Copy(&orderSettle, &settle); err != nil {
+		return fmt.Errorf("copy settlement snapshot failed: %w", err)
+	}
+
+	// ===== 更新订单表（绑定通道 + 费率 + 成本 + 利润 + 结算快照）=====
+	orderTable := shard.OrderShard.GetTable(order.OrderID, now)
+	updateOrder := map[string]interface{}{
+		"supplier_id":      product.UpstreamId,
+		"channel_id":       product.SysChannelID,
+		"up_channel_id":    product.ID,
+		"channel_code":     product.SysChannelCode,
+		"channel_title":    product.SysChannelTitle,
+		"up_channel_code":  product.UpstreamCode,
+		"up_channel_title": product.UpChannelTitle,
+		"m_rate":           product.MDefaultRate,
+		"up_rate":          product.CostRate,
+		"m_fixed_fee":      product.MSingleFee,
+		"up_fixed_fee":     product.CostFee,
+		"fees":             settle.MerchantTotalFee,
+		"country":          product.Country,
+		"cost":             costFee,
+		"profit":           profitFee,
+		"currency":         product.Currency,
+		"settle_snapshot":  ordermodel.SettleSnapshot(orderSettle), // ✅ 更新结算快照
+		"update_time":      now,
+	}
+
+	if err := dal.OrderDB.Table(orderTable).
+		Where("order_id = ?", order.OrderID).
+		Updates(updateOrder).Error; err != nil {
+		return fmt.Errorf("update order binding failed: %w", err)
+	}
+
+	// ===== 更新上游交易表（供应商ID可能变化）=====
+	if upTx != nil {
+		txTable := shard.UpOrderShard.GetTable(upTx.UpOrderId, now)
+		updateTx := map[string]interface{}{
+			"supplier_id": product.UpstreamId,
+			"currency":    product.Currency,
+			"update_time": now,
+		}
+		if err := dal.OrderDB.Table(txTable).
+			Where("order_id = ? AND up_order_id = ?", upTx.OrderID, upTx.UpOrderId).
+			Updates(updateTx).Error; err != nil {
+			return fmt.Errorf("update upstream tx failed: %w", err)
+		}
+	}
+
+	return nil
 }
 
 // validateCreateRequest 验证创建订单请求
