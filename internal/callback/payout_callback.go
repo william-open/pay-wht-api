@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"io"
 	"log"
 	"net/http"
@@ -149,19 +150,20 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 				log.Printf("获取国家信息异常: %v", cErr)
 			}
 			if err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
-				OrderID:    strconv.FormatUint(order.OrderID, 10),
-				MerchantID: order.MID,
-				CountryID:  country.ID,
-				ChannelID:  order.ChannelID,
-				SupplierID: order.SupplierID,
-				Amount:     order.Amount,
-				Profit:     *order.Profit,
-				Cost:       *order.Cost,
-				Fee:        order.Fees,
-				Status:     2,
-				OrderType:  "payout",
-				Currency:   order.Currency,
-				CreateTime: time.Now(),
+				OrderID:       strconv.FormatUint(order.OrderID, 10),
+				MerchantID:    order.MID,
+				CountryID:     country.ID,
+				ChannelID:     order.ChannelID,
+				SupplierID:    order.SupplierID,
+				Amount:        decimal.Zero,
+				SuccessAmount: order.Amount,
+				Profit:        *order.Profit,
+				Cost:          *order.Cost,
+				Fee:           order.Fees,
+				Status:        2,
+				OrderType:     "payout",
+				Currency:      order.Currency,
+				CreateTime:    time.Now(),
 			}); err != nil {
 				notify.Notify(system.BotChatID, "warn", "代付回调商户",
 					fmt.Sprintf("⚠️  发布订单统计失败 OrderID=%v: %v", order.OrderID, err), true)

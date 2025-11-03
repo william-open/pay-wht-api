@@ -97,6 +97,8 @@ func EscapeMarkdownV2(text string) string {
 		"}", "\\}",
 		".", "\\.",
 		"!", "\\!",
+		"<", "\\<", // ✅ 新增：< 也需转义（HTML 符号冲突）
+		"&", "\\&", // ✅ 新增：防止 HTML 解析干扰
 	)
 	// 二次安全: 把多个反斜杠压缩为单一符号（避免二次拼接出现 "\\\\"）
 	safe := replacer.Replace(text)

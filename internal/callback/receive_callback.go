@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"io"
 	"log"
 	"net"
@@ -134,19 +135,20 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 				log.Printf("获取国家信息异常: %v", cErr)
 			}
 			err := s.pub.Publish("order_stat", &dto.OrderMessageMQ{
-				OrderID:    strconv.FormatUint(order.OrderID, 10),
-				MerchantID: order.MID,
-				CountryID:  country.ID,
-				ChannelID:  order.ChannelID,
-				SupplierID: order.SupplierID,
-				Amount:     order.Amount,
-				Profit:     *order.Profit,
-				Cost:       *order.Cost,
-				Fee:        order.Fees,
-				Status:     2,
-				OrderType:  "collect",
-				Currency:   order.Currency,
-				CreateTime: time.Now(),
+				OrderID:       strconv.FormatUint(order.OrderID, 10),
+				MerchantID:    order.MID,
+				CountryID:     country.ID,
+				ChannelID:     order.ChannelID,
+				SupplierID:    order.SupplierID,
+				Amount:        decimal.Zero,
+				SuccessAmount: order.Amount,
+				Profit:        *order.Profit,
+				Cost:          *order.Cost,
+				Fee:           order.Fees,
+				Status:        2,
+				OrderType:     "collect",
+				Currency:      order.Currency,
+				CreateTime:    time.Now(),
 			})
 			if err != nil {
 				notify.Notify(system.BotChatID, "warn", "代收回调商户",
