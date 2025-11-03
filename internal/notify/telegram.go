@@ -76,8 +76,8 @@ func buildHTTPClient() *http.Client {
 	}
 }
 
+// EscapeMarkdownV2 安全转义所有 Telegram MarkdownV2 特殊字符
 func EscapeMarkdownV2(text string) string {
-	// 按照 Telegram 官方要求转义所有特殊字符
 	replacer := strings.NewReplacer(
 		"_", "\\_",
 		"*", "\\*",
@@ -90,7 +90,7 @@ func EscapeMarkdownV2(text string) string {
 		">", "\\>",
 		"#", "\\#",
 		"+", "\\+",
-		"-", "\\-", // ✅ 转义 '-'
+		"-", "\\-",
 		"=", "\\=",
 		"|", "\\|",
 		"{", "\\{",
@@ -98,7 +98,10 @@ func EscapeMarkdownV2(text string) string {
 		".", "\\.",
 		"!", "\\!",
 	)
-	return replacer.Replace(text)
+	// 二次安全: 把多个反斜杠压缩为单一符号（避免二次拼接出现 "\\\\"）
+	safe := replacer.Replace(text)
+	safe = strings.ReplaceAll(safe, "\\\\", "\\")
+	return safe
 }
 
 // ================= 基础发送函数 =================
