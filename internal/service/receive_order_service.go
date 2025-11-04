@@ -344,8 +344,8 @@ func (s *ReceiveOrderService) updateOrderBindOnSuccess(
 	}
 
 	// 成本与利润重算（与 createOrder 一致的口径）
-	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100))
-	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100))
+	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100)).Add(product.CostFee)
+	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100)).Add(product.MSingleFee)
 	profitFee := orderFee.Sub(costFee)
 
 	// 拷贝结算快照结构（防止修改引用）
@@ -684,8 +684,10 @@ func (s *ReceiveOrderService) createOrder(
 	}
 
 	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
-	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100))      //上游成本费用
+	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100)) //上游成本费用
+	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
+	orderFee = orderFee.Add(payChannelProduct.MSingleFee)
 	profitFee := orderFee.Sub(costFee)
 	m := &ordermodel.MerchantOrder{
 		OrderID:        oid,
