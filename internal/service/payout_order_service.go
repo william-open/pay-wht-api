@@ -403,7 +403,7 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 
 	// 2️⃣ 重新计算费用结构
 	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100)).Add(product.CostFee)
-	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100))
+	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100)).Add(product.MSingleFee)
 	profitFee := orderFee.Sub(costFee)
 	orderFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
 
@@ -700,6 +700,7 @@ func (s *PayoutOrderService) createOrder(
 	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100)) //上游成本费用
 	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
+	orderFee = orderFee.Add(payChannelProduct.MSingleFee)
 	profitFee := orderFee.Sub(costFee)
 	orderFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
 	m := &ordermodel.MerchantPayOutOrderM{
