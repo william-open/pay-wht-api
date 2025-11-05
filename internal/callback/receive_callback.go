@@ -296,8 +296,8 @@ func (s *ReceiveCallback) receiveNotifyMerchant(url string, payload dto.ReceiveN
 		return fmt.Errorf("[CALLBACK-RECEIVE] update merchant order failed: %v", err)
 	}
 
-	notifyMerchantCallback("info", "[回调商户-代收] 通知成功", payload, url,
-		"回调状态: Success", string(body), respStr)
+	//notifyMerchantCallback("info", "[回调商户-代收] 通知成功", payload, url,
+	//	"回调状态: Success", string(body), respStr)
 
 	log.Printf("[CALLBACK-RECEIVE] ✅ 通知下游商户成功, 商户号: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
 	return nil
