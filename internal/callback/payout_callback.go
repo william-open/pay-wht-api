@@ -282,8 +282,8 @@ func (s *PayoutCallback) payoutNotifyMerchant(url string, payload dto.PayoutNoti
 		return fmt.Errorf("[CALLBACK-PAYOUT] update merchant order failed: %v", err)
 	}
 
-	notifyPayoutCallback("info", "[回调商户-代付] 通知成功", payload, url,
-		"回调状态: Success", string(body), respStr)
+	//notifyPayoutCallback("info", "[回调商户-代付] 通知成功", payload, url,
+	//	"回调状态: Success", string(body), respStr)
 
 	log.Printf("[CALLBACK-PAYOUT] ✅ 通知下游商户成功, 商户: %v, 订单号: %v", payload.MerchantNo, payload.TranFlow)
 	return nil
