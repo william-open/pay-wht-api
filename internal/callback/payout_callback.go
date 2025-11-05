@@ -368,6 +368,7 @@ func (s *PayoutCallback) payoutGenerateSign(p dto.PayoutNotifyMerchantPayload, a
 		"tran_flow":     p.TranFlow,
 		"pay_serial_no": p.PaySerialNo,
 		"amount":        p.Amount,
+		"merchant_no":   p.MerchantNo,
 	}
 	return utils.GenerateSign(signStr, apiKey)
 }
