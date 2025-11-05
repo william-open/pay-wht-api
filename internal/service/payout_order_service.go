@@ -9,6 +9,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"log"
+	"math"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -205,7 +206,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 			}
 			products = []dto.PayProductVo{single}
 		} else {
-			products, err = s.selectPollingChannels(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, amount)
+			products, err = s.selectWeightedPollingChannels(uint(merchant.MerchantID), req.PayType, 2, channelDetail.Currency, amount)
 			if err != nil {
 				return resp, err
 			}
@@ -384,6 +385,75 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	}(order)
 
 	return resp, nil
+}
+
+// ================== 轮询通道选择 ==================
+// ✅ 使用平滑加权轮询（SWRR + Redis状态持久化）
+func (s *PayoutOrderService) selectWeightedPollingChannels(
+	merchantID uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal,
+) ([]dto.PayProductVo, error) {
+
+	// 1️⃣ 获取当前商户可用通道
+	products, err := s.mainDao.GetAvailablePollingPayProducts(merchantID, sysChannelCode, currency, channelType)
+	if err != nil || len(products) == 0 {
+		return nil, errors.New("no channel products available")
+	}
+
+	// 2️⃣ 动态降权（5分钟失败≥3次则降半）
+	for i := range products {
+		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		if failCnt >= 3 {
+			newWeight := int(math.Max(1, float64(products[i].UpstreamWeight/2)))
+			log.Printf("[WEIGHT-DECAY] payout 上游=%d 失败次数=%d, 权重降为 %d",
+				products[i].UpstreamId, failCnt, newWeight)
+			products[i].UpstreamWeight = newWeight
+		}
+	}
+
+	// 3️⃣ 组装权重Map
+	weights := make(map[int64]int)
+	for _, p := range products {
+		weights[p.ID] = p.UpstreamWeight
+	}
+
+	// 4️⃣ 平滑加权轮询核心（Redis全局状态）
+	key := fmt.Sprintf("rr_state:payout:%s:%s", sysChannelCode, currency)
+	selectedID := utils.SmoothWeightedRR(key, weights)
+
+	// 5️⃣ 主通道优先 + 备用通道按权重降序
+	var ordered []dto.PayProductVo
+	for _, p := range products {
+		if p.ID == selectedID {
+			ordered = append(ordered, p)
+			break
+		}
+	}
+	sort.SliceStable(products, func(i, j int) bool {
+		return products[i].UpstreamWeight > products[j].UpstreamWeight
+	})
+	for _, p := range products {
+		if p.ID != selectedID {
+			ordered = append(ordered, p)
+		}
+	}
+
+	// 6️⃣ 金额范围过滤
+	var filtered []dto.PayProductVo
+	for _, p := range ordered {
+		rangeStr := fmt.Sprintf("%v-%v", p.MinAmount, p.MaxAmount)
+		if utils.MatchOrderRange(amount, rangeStr) {
+			filtered = append(filtered, p)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil, errors.New("no suitable payout channel found after weighted polling")
+	}
+
+	log.Printf("[PAYOUT-RR] currency=%s, selectedID=%d, total=%d, filtered=%d",
+		currency, selectedID, len(products), len(filtered))
+
+	return filtered, nil
 }
 
 // updatePayoutOrderBindOnSuccess 成功后更新订单绑定、费率、成本、利润、settle_snapshot

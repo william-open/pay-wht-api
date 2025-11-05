@@ -7,6 +7,7 @@ import (
 	"github.com/jinzhu/copier"
 	"gorm.io/gorm"
 	"log"
+	"math"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -95,8 +96,7 @@ func (s *ReceiveOrderService) getUpstreamFailCount(upstreamID uint64) int {
 	return cnt
 }
 
-// Create 处理代收订单下单业务逻辑（高并发优化版）
-// ================== Create 主流程 ==================
+// -------------------- Create 主流程 --------------------
 func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrderResp, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -110,75 +110,63 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		}
 	}()
 
-	// 1 参数验证
+	// 参数验证
 	if err = validateCreateRequest(req); err != nil {
 		return resp, err
 	}
 
-	// 2 商户信息
+	// 商户信息
 	merchant, err := s.getMerchantWithCache(req.MerchantNo)
 	if err != nil || merchant == nil {
 		return resp, fmt.Errorf("merchant invalid: %w", err)
 	}
 
-	// 3 金额
+	// 金额校验
 	amount, err := decimal.NewFromString(req.Amount)
 	if err != nil {
 		return resp, errors.New("amount format error")
 	}
 
-	// 4 通道信息
+	// 通道信息
 	channelDetail, err := s.getSysChannelWithCache(req.PayType)
 	if err != nil || channelDetail == nil {
 		return resp, errors.New("channel invalid")
 	}
 
-	// 5 商户通道
+	// 商户通道信息
 	merchantChannelInfo, err := NewCommonService().GetMerchantChannelInfo(merchant.MerchantID, req.PayType)
 	if err != nil || merchantChannelInfo == nil {
 		return resp, errors.New("merchant channel invalid")
 	}
 
-	// 6 选择通道
+	// ================== 平滑加权轮询通道选择 ==================
 	var products []dto.PayProductVo
 	if req.PayProductId != "" {
-		// 先转成 uint64，再强转成 uint
 		payProductId, err := strconv.ParseUint(req.PayProductId, 10, 64)
 		if err != nil {
-			fmt.Println("转换失败:", err)
-			return resp, errors.New("test admin no single channel available,pay_product_id transfer error")
+			return resp, errors.New("test admin pay_product_id transfer error")
 		}
 		single, err := s.TestSelectSingleChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, payProductId)
 		if err != nil {
-			return resp, errors.New("admin test no single channel available")
-		}
-		// 检查金额是否在通道允许范围内
-		orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
-		if !utils.MatchOrderRange(amount, orderRange) {
-			return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
+			return resp, errors.New("admin test channel invalid")
 		}
 		products = []dto.PayProductVo{single}
 	} else {
 		if merchantChannelInfo.DispatchMode == 2 {
 			single, err := s.SelectSingleChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency)
 			if err != nil {
-				return resp, errors.New("no single channel available")
-			}
-			// 检查金额是否在通道允许范围内
-			orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
-			if !utils.MatchOrderRange(amount, orderRange) {
-				return resp, errors.New(fmt.Sprintf("the amount does not meet the risk control requirements..order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
+				return resp, err
 			}
 			products = []dto.PayProductVo{single}
 		} else {
-			products, err = s.selectPollingChannelWithRetry(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, amount)
+			products, err = s.selectWeightedPollingChannel(uint(merchant.MerchantID), req.PayType, 1, channelDetail.Currency, amount)
 			if err != nil {
 				return resp, err
 			}
 		}
 	}
 
-	// 7 幂等检查
+	// 幂等检查
 	oid, exists, err := s.checkIdempotency(merchant.MerchantID, req.TranFlow)
 	if err != nil {
 		return resp, err
@@ -187,80 +175,61 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		return resp, nil
 	}
 
-	// 8 计算结算
+	// 结算计算
 	settle, err := s.calculateSettlement(merchant, products[0], amount)
 	if err != nil {
 		return resp, err
 	}
 
-	// 9 创建订单
+	// 创建订单及上游事务
 	now := time.Now()
 	order, tx, err := s.createOrderAndTransaction(merchant, req, products[0], amount, oid, now, settle)
 	if err != nil {
 		return resp, err
 	}
 
-	// 10 调用上游（失败降级）
+	// ================== 调用上游通道 ==================
 	var payUrl string
 	var lastErr error
 	for _, product := range products {
 		payUrl, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId)
 		if err == nil {
-			// 清理失败计数
 			s.clearUpstreamFail(uint64(product.UpstreamId))
 
-			// ✅ 成功后异步更新「订单与上游交易」的通道绑定信息（按实际成功的 product）
+			// 异步更新订单绑定
 			go func(p dto.PayProductVo) {
-				if e := s.updateOrderBindOnSuccess(order, tx, merchant, p, amount, now); e != nil {
-					log.Printf("update order binding after success failed: %v", e)
+				if err := s.updateOrderBindOnSuccess(order, tx, merchant, p, amount, now); err != nil {
+					log.Printf("[ORDER-BIND-UPDATE] ❌ 更新订单绑定失败: orderID=%d, upstream=%s, err=%v", order.OrderID, p.UpstreamCode, err)
 					notify.Notify(system.BotChatID, "warn", "订单绑定更新失败",
-						fmt.Sprintf("订单号: %d, 通道: %s/%s, 错误: %v", order.OrderID, p.SysChannelCode, p.UpstreamCode, e), true)
+						fmt.Sprintf("⚠️ OrderID: %d\n上游: %s\n错误: %v", order.OrderID, p.UpstreamCode, err), true)
 				}
 			}(product)
 
-			// 更新成功率（异步）
+			// 异步更新通道成功率
 			go func(pid int64) {
-				if e := s.mainDao.UpdateSuccessRate(pid, true); e != nil {
-					log.Printf("update channel success rate failed: %v", e)
+				if err := s.mainDao.UpdateSuccessRate(pid, true); err != nil {
+					log.Printf("[SUCCESS-RATE] ❌ 更新通道成功率失败: productID=%d, err=%v", pid, err)
 				}
 			}(product.ID)
 			break
 		}
-
-		// 失败：更新成功率（异步）
+		// 当前上游失败
+		s.recordUpstreamFail(uint64(product.UpstreamId))
 		go func(pid int64) {
-			if e := s.mainDao.UpdateSuccessRate(pid, false); e != nil {
-				log.Printf("update channel success rate failed: %v", e)
+			if err := s.mainDao.UpdateSuccessRate(pid, false); err != nil {
+				log.Printf("[SUCCESS-RATE] ❌ 更新通道成功率失败: productID=%d, err=%v", pid, err)
 			}
 		}(product.ID)
-
-		// 记录失败计数 + 告警
-		s.recordUpstreamFail(uint64(product.UpstreamId))
-		notify.Notify(system.BotChatID, "warn", "代收上游调用失败",
-			fmt.Sprintf("\n商户号: %s\n通道编码: %s\n上游通道: %s\n上游接口: %s\n供应商: %s\n订单号: %s\n失败原因: %v\n商户请求参数: %s",
-				req.MerchantNo, req.PayType, product.UpChannelTitle, product.InterfaceCode,
-				product.UpstreamTitle, req.TranFlow, err, utils.MapToJSON(req)), true)
-
 		lastErr = err
 	}
 
-	// 下单失败，更新订单状态
+	// 所有上游都失败
 	if payUrl == "" && lastErr != nil {
 		go func() {
-			orderTable := shard.OrderShard.GetTable(order.OrderID, time.Now())
-
-			updateData := map[string]interface{}{
-				"status":      5,
-				"update_time": time.Now(),
-			}
-
-			if updateErr := dal.OrderDB.Table(orderTable).
-				Where("order_id = ?", order.OrderID).
-				Updates(updateData).Error; updateErr != nil {
-				log.Printf("[代收]订单下单失败，更新订单状态失败，平台流水号: %v，错误: %v", order.OrderID, updateErr)
-			}
+			table := shard.OrderShard.GetTable(order.OrderID, now)
+			dal.OrderDB.Table(table).Where("order_id = ?", order.OrderID).
+				Updates(map[string]interface{}{"status": 5, "update_time": time.Now()})
 		}()
-
 		resp = dto.CreateOrderResp{
 			TranFlow: req.TranFlow, PaySerialNo: strconv.FormatUint(oid, 10),
 			Amount: req.Amount, Code: "001", SysTime: strconv.FormatInt(utils.GetTimestampMs(), 10),
@@ -268,37 +237,112 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		return resp, lastErr
 	}
 
-	// 11 构建响应
+	// 成功返回
 	resp = dto.CreateOrderResp{
 		TranFlow: req.TranFlow, PaySerialNo: strconv.FormatUint(oid, 10),
 		Amount: req.Amount, Code: "0", Status: "0001",
 		SysTime: strconv.FormatInt(utils.GetTimestampMs(), 10), Yul1: payUrl,
 	}
 
-	// 12 异步事件
+	// 异步缓存订单 & 发布统计消息
 	go s.asyncPostOrderCreation(oid, order, merchant.MerchantID, req.TranFlow, req.Amount, now)
-	// 13) 异步处理统计数据
-	go func(ord *ordermodel.MerchantOrder) {
+	// 异步发布订单统计事件
+	go s.publishOrderStat(order)
+
+	return resp, nil
+}
+
+// ================== 平滑加权轮询 + 均匀分配 ==================
+func (s *ReceiveOrderService) selectWeightedPollingChannel(
+	merchantID uint, sysChannelCode string, channelType int8, currency string, amount decimal.Decimal,
+) ([]dto.PayProductVo, error) {
+
+	// 获取当前商户可用通道
+	products, err := s.mainDao.GetAvailablePollingPayProducts(merchantID, sysChannelCode, currency, channelType)
+	if err != nil || len(products) == 0 {
+		return nil, errors.New("no channel products available")
+	}
+
+	// 动态降权（近5分钟失败≥3次则降半）
+	for i := range products {
+		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		if failCnt >= 3 {
+			newWeight := int(math.Max(1, float64(products[i].UpstreamWeight/2)))
+			log.Printf("[WEIGHT-DECAY] 上游=%d 失败次数=%d, 权重降为 %d", products[i].UpstreamId, failCnt, newWeight)
+			products[i].UpstreamWeight = newWeight
+		}
+	}
+
+	// 组装加权map
+	weights := make(map[int64]int)
+	for _, p := range products {
+		weights[p.ID] = p.UpstreamWeight
+	}
+
+	// 平滑加权轮询（Redis全局状态保存）
+	key := fmt.Sprintf("rr_state:%s:%s", sysChannelCode, currency)
+	selectedID := utils.SmoothWeightedRR(key, weights)
+
+	// 主通道优先 + 备用通道按权重降序
+	var ordered []dto.PayProductVo
+	for _, p := range products {
+		if p.ID == selectedID {
+			ordered = append(ordered, p)
+			break
+		}
+	}
+	// 加入剩余通道（按权重排序）
+	sort.SliceStable(products, func(i, j int) bool {
+		return products[i].UpstreamWeight > products[j].UpstreamWeight
+	})
+	for _, p := range products {
+		if p.ID != selectedID {
+			ordered = append(ordered, p)
+		}
+	}
+
+	// 金额范围过滤
+	var filtered []dto.PayProductVo
+	for _, p := range ordered {
+		rangeStr := fmt.Sprintf("%v-%v", p.MinAmount, p.MaxAmount)
+		if utils.MatchOrderRange(amount, rangeStr) {
+			filtered = append(filtered, p)
+		}
+	}
+
+	if len(filtered) == 0 {
+		return nil, errors.New("no suitable channel found after weighted polling")
+	}
+
+	log.Printf("[CHANNEL-RR] currency=%s, selectedID=%d, total=%d, filtered=%d",
+		currency, selectedID, len(products), len(filtered))
+
+	return filtered, nil
+}
+
+// publishOrderStat 异步发布订单统计事件
+func (s *ReceiveOrderService) publishOrderStat(ord *ordermodel.MerchantOrder) {
+	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[order_stat panic recovered] %v\n%s", r, debug.Stack())
 			}
 		}()
 
-		// ① 先拿 country，注意判空
+		// 查询国家信息
 		country, cErr := s.mainDao.GetCountry(ord.Currency)
 		if cErr != nil {
 			notify.Notify(system.BotChatID, "warn", "代收下单统计",
-				fmt.Sprintf("⚠️ order %v, 获取国家信息异常: err=%v country=%v", ord.OrderID, cErr, country), true)
+				fmt.Sprintf("⚠️ order %v, 获取国家信息异常: err=%v currency=%v", ord.OrderID, cErr, ord.Currency), true)
 			return
 		}
 
-		// ② publisher 可能没初始化，判空
 		if s.pub == nil {
 			log.Printf("[order_stat] publisher is nil, skip publish. order=%v", ord.OrderID)
 			return
 		}
 
+		// 组装 MQ 消息体
 		msg := &dto.OrderMessageMQ{
 			OrderID:       strconv.FormatUint(ord.OrderID, 10),
 			MerchantID:    ord.MID,
@@ -316,18 +360,17 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 			CreateTime:    time.Now(),
 		}
 
+		// 入列统计队列
 		if err := s.pub.Publish("order_stat", msg); err != nil {
 			notify.Notify(system.BotChatID, "warn", "代收下单统计",
 				fmt.Sprintf("⚠️ order %v, 统计数据入列失败: %v", ord.OrderID, err), true)
 			return
 		}
-		log.Printf("[order_stat] 入列成功, order=%v", ord.OrderID)
-	}(order) // 显式传参，避免闭包误用/未来被改
 
-	return resp, nil
+		log.Printf("[order_stat] 入列成功, order=%v, merchant=%v, channel=%v", ord.OrderID, ord.MID, ord.ChannelID)
+	}()
 }
 
-// updateOrderBindOnSuccess 成功后将订单与实际成功的通道产品进行绑定，并重新计算费用/利润
 // updateOrderBindOnSuccess 成功后将订单与实际成功的通道产品进行绑定，并重新计算费用/利润/快照
 func (s *ReceiveOrderService) updateOrderBindOnSuccess(
 	order *ordermodel.MerchantOrder,
