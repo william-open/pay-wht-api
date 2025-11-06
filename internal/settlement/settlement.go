@@ -22,7 +22,7 @@ func NewSettlement() *Settlement {
 }
 
 // DoPaySettlement 处理代收订单结算逻辑
-func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, orderId uint64) error {
+func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, orderId uint64, mOrderId string) error {
 	orderNo := strconv.FormatUint(orderId, 10)
 
 	log.Printf("[SETTLEMENT] 开始结算: 商户=%v, 订单号=%v, 数据=%+v", mId, orderNo, req)
@@ -41,6 +41,7 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 		UID:         merchant.MerchantID,
 		Money:       req.MerchantRecv,
 		OrderNo:     orderNo,
+		MOrderNo:    mOrderId,
 		Type:        dto.MoneyLogTypeDeposit, // ✅ 常量定义
 		Operator:    merchant.NickName,
 		Description: "商户代收",
@@ -56,6 +57,7 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 		AID:        merchant.PId,
 		MID:        merchant.MerchantID,
 		OrderNo:    orderNo,
+		MOrderNo:   mOrderId,
 		OrderMoney: req.OrderAmount,
 		Money:      req.AgentIncome,
 		Currency:   req.Currency,
@@ -73,7 +75,7 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 
 // DoPayoutSettlement 处理代付订单结算逻辑
 // status = true 表示代付成功，false 表示代付失败
-func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, status bool, orderAmount decimal.Decimal) error {
+func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, orderId uint64, mOrderNo string, status bool, orderAmount decimal.Decimal) error {
 	orderNo := strconv.FormatUint(orderId, 10)
 
 	log.Printf("[SETTLEMENT] 开始代付结算: 商户=%v, 订单号=%v, 商户费用=%v,代理佣金=%v,货币=%s, 状态=%v, 数据=%+v",
@@ -93,6 +95,7 @@ func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, or
 		merchant.MerchantID,
 		req.Currency,
 		orderNo,
+		mOrderNo,
 		req.MerchantTotalFee,
 		req.AgentTotalFee,
 		status,
@@ -109,6 +112,7 @@ func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, or
 			AID:        merchant.PId,
 			MID:        merchant.MerchantID,
 			OrderNo:    orderNo,
+			MOrderNo:   mOrderNo,
 			OrderMoney: req.OrderAmount,
 			Money:      req.AgentIncome,
 			Currency:   req.Currency,

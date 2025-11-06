@@ -708,7 +708,7 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 		}
 		// 冻结商户资金
 		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
-		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), needFreezeAmount, merchant.NickName)
+		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), req.TranFlow, needFreezeAmount, merchant.NickName)
 		if freezeErr != nil {
 			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
 		}
@@ -741,9 +741,9 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 }
 
 // 冻结资金
-func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo string, amount decimal.Decimal, operator string) error {
+func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo string, mOrderNo string, amount decimal.Decimal, operator string) error {
 
-	err := s.mainDao.FreezePayout(uid, currency, orderNo, amount, operator)
+	err := s.mainDao.FreezePayout(uid, currency, orderNo, mOrderNo, amount, operator)
 	if err != nil {
 		return fmt.Errorf("freeze merchant money failed: %w", err)
 	}

@@ -243,6 +243,7 @@ func rollbackPayoutAmount(merchantId string, order *orderModel.MerchantPayOutOrd
 	if err := settleService.DoPayoutSettlement(settlementResult,
 		merchantId,
 		order.OrderID,
+		order.MOrderID,
 		isSuccess,
 		order.Amount,
 	); err != nil {
