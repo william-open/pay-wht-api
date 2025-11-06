@@ -211,7 +211,7 @@ func (d *MainDao) QueryPlatformBankInfo(internalBankCode string, currency string
 }
 
 // FreezePayout 创建代付订单时冻结资金并写冻结日志
-func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount decimal.Decimal, operator string) error {
+func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, mOrderNo string, amount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("freeze payout failed: %w", err)
 	}
@@ -246,6 +246,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 			UID:         uid,
 			Money:       amount.Neg(), // 扣减余额
 			OrderNo:     orderNo,
+			MOrderNo:    mOrderNo,
 			Type:        dto.MoneyLogTypeFreeze,
 			Description: fmt.Sprintf("代付下单冻结资金，冻结前=%s，冻结后=%s", oldFreeze, newFreeze),
 			OldBalance:  oldBalance,
