@@ -282,7 +282,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, amount deci
 
 // HandlePayoutCallback 处理代付回调资金逻辑
 // status = true 表示代付成功；false 表示代付失败（解冻回余额）
-func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, merchantFees decimal.Decimal, agentFees decimal.Decimal, status bool, orderAmount decimal.Decimal, operator string) error {
+func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mOrderNo string, merchantFees decimal.Decimal, agentFees decimal.Decimal, status bool, orderAmount decimal.Decimal, operator string) error {
 	if err := d.checkDB(); err != nil {
 		return fmt.Errorf("handle payout callback failed: %w", err)
 	}
@@ -320,6 +320,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mer
 				UID:         uid,
 				Money:       orderAmount.Neg(), // 记账为出账金额；Balance 不变仅用于展示可用余额
 				OrderNo:     orderNo,
+				MOrderNo:    mOrderNo,
 				Type:        dto.MoneyLogTypePayout,
 				Description: "代付成功，扣除冻结资金",
 				OldBalance:  oldBalance,
@@ -355,6 +356,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mer
 			UID:         uid,
 			Money:       orderAmount.Neg(), // 动作金额（冻结侧减少）
 			OrderNo:     orderNo,
+			MOrderNo:    mOrderNo,
 			Type:        dto.MoneyLogTypeUnfreezeDel,
 			Description: "代付失败，取消冻结资金",
 			OldBalance:  oldBalance,
@@ -374,6 +376,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mer
 			UID:         uid,
 			Money:       orderAmount, // 回到可用余额
 			OrderNo:     orderNo,
+			MOrderNo:    mOrderNo,
 			Type:        dto.MoneyLogTypeUnfreeze,
 			Description: "代付失败，解冻资金退回余额",
 			OldBalance:  oldBalance,
@@ -432,6 +435,7 @@ func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 			UID:         moneyLog.UID,
 			Money:       moneyLog.Money,
 			OrderNo:     moneyLog.OrderNo,
+			MOrderNo:    moneyLog.MOrderNo,
 			Type:        moneyLog.Type,
 			Operator:    moneyLog.Operator,
 			Description: moneyLog.Description,
@@ -547,6 +551,7 @@ func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney, moneyLogType in
 			AID:        agentMoney.AID,
 			MID:        agentMoney.MID,
 			OrderNo:    agentMoney.OrderNo,
+			MOrderNo:   agentMoney.MOrderNo,
 			Type:       agentMoney.Type,
 			OrderMoney: agentMoney.OrderMoney,
 			Remark:     agentMoney.Remark,
@@ -577,6 +582,7 @@ func (d *MainDao) CreateAgentMoneyLog(agentMoney dto.AgentMoney, moneyLogType in
 			UID:         agentMoney.AID, // ✅ 改成代理 ID
 			Money:       agentMoney.Money,
 			OrderNo:     agentMoney.OrderNo,
+			MOrderNo:    agentMoney.MOrderNo,
 			Type:        moneyLogType, // 固定类型：代理代收佣金
 			Operator:    "",           // 可传操作人
 			Description: remark,

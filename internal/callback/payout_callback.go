@@ -131,6 +131,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	if err := settleService.DoPayoutSettlement(settlementResult,
 		strconv.FormatUint(merchant.MerchantID, 10),
 		order.OrderID,
+		order.MOrderID,
 		isSuccess,
 		order.Amount,
 	); err != nil {

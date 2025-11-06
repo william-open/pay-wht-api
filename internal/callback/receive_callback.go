@@ -119,7 +119,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 		var settleService = settlement.NewSettlement()
 		var settlementResult dto.SettlementResult
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
-		err := settleService.DoPaySettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID)
+		err := settleService.DoPaySettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID, order.MOrderID)
 		if err != nil {
 			notify.Notify(system.BotChatID, "warn", "代收回调商户",
 				fmt.Sprintf("⚠️ order %v, settlement  failed err: %v", order.OrderID, err), true)

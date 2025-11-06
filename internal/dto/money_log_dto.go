@@ -7,7 +7,8 @@ type MoneyLog struct {
 	UID         uint64          `json:"uid"`         // 用户ID
 	AId         uint64          `json:"aId"`         // 代理ID
 	Money       decimal.Decimal `json:"money"`       // 金额
-	OrderNo     string          `json:"order_no"`    // 订单编码
+	OrderNo     string          `json:"order_no"`    // 平台订单编码
+	MOrderNo    string          `json:"m_order_no"`  // 商户订单编码
 	Type        int8            `json:"type"`        // 收益类型
 	Operator    string          `json:"operator"`    // 操作者
 	Currency    string          `json:"currency"`    // 币种
