@@ -535,7 +535,7 @@ func (s *ReassignOrderService) createTransaction(
 	updateErr := s.orderDao.UpdateByWhere(orderTable, map[string]interface{}{
 		"order_id": oid,
 	}, map[string]interface{}{
-		"up_order_id":     tx.UpOrderNo,
+		"up_order_id":     tx.UpOrderId,
 		"settle_snapshot": ordermodel.PayoutSettleSnapshot(orderSettle),
 	})
 
