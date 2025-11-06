@@ -540,7 +540,8 @@ func (s *ReassignOrderService) createTransaction(
 	})
 
 	if updateErr != nil {
-		return nil, nil, fmt.Errorf(" reassign order update  order setttle failed: %w", err)
+		log.Printf("[WARN] 更新订单结算失败: table=%s, oid=%d, err=%v", orderTable, oid, updateErr)
+		return nil, nil, fmt.Errorf("reassign order update order settle failed: %w", updateErr)
 	}
 
 	txTable := shard.UpOutOrderShard.GetTable(tx.UpOrderId, now)
