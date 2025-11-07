@@ -56,7 +56,7 @@ func WriteOrderLog(payload *dto.AuditContextPayload) {
 		}
 		// ⚠️ 失败发送通知 Telegram
 		notify.Notify(system.BotChatID, "warn", fmt.Sprintf("[%s]调用失败", requestType),
-			fmt.Sprintf("通道编码: %s\n商户订单号: %s\n请求状态: %s\n商户号:%s\n商户名称: %s\n请求IP: %s\n请求参数: %s\n响应参数: %s",
+			fmt.Sprintf("通道编码: %s\n商户订单号: %s\n请求状态: %s\n商户号:%s\n商户名称: %s\n请求IP: %s\n请求参数: \n%s\n响应参数: \n%s",
 				payload.ChannelCode,
 				payload.TranFlow,
 				"失败",
