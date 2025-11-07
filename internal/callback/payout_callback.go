@@ -144,7 +144,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		isSuccess,
 		order.Amount,
 	); err != nil {
-		notifyMsg := fmt.Sprintf("结算失败,交易订单号: %v,平台订单号: %v,商户订单号: %v,错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
+		notifyMsg := fmt.Sprintf("结算失败\n交易订单号: %v\n平台订单号: %v\n商户订单号: %v\n错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
 		notify.Notify(system.BotChatID, "warn", "代付回调商户",
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
