@@ -137,7 +137,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 		settlementResult = dto.SettlementResult(order.SettleSnapshot)
 		err := settleService.DoPaySettlement(settlementResult, strconv.FormatUint(merchant.MerchantID, 10), order.OrderID, order.MOrderID)
 		if err != nil {
-			notifyMsg := fmt.Sprintf("结算失败,交易订单号: %v,平台订单号: %v,商户订单号: %v,错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
+			notifyMsg := fmt.Sprintf("结算失败\n交易订单号: %v\n平台订单号: %v\n商户订单号: %v\n错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
 			notify.Notify(system.BotChatID, "warn", "代收回调商户",
 				notifyMsg, true)
 			return fmt.Errorf(notifyMsg)

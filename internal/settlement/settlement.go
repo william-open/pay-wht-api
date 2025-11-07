@@ -102,7 +102,7 @@ func (s *Settlement) DoPayoutSettlement(req dto.SettlementResult, mId string, or
 		orderAmount,
 		merchant.NickName,
 	); handleErr != nil {
-		return fmt.Errorf("[SETTLEMENT][payout] 商户资金结算失败, merchantID=%v, orderNo=%v, 商户手续费金额=%v,代理手续费金额=%v, err=%w",
+		return fmt.Errorf("[SETTLEMENT][payout] 商户资金结算失败\n 商户ID:%v\n平台订单号:%v\n商户手续费金额:%v\n代理手续费金额:%v\n错误:%w",
 			merchant.MerchantID, orderNo, req.MerchantTotalFee, req.AgentTotalFee, handleErr)
 	}
 
