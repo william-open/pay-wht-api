@@ -8,6 +8,7 @@ import (
 	"time"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/logger"
+	"wht-order-api/internal/utils"
 )
 
 func TraceAuditMiddleware() gin.HandlerFunc {
@@ -19,7 +20,7 @@ func TraceAuditMiddleware() gin.HandlerFunc {
 		ctx := &dto.AuditContextPayload{
 			TraceID:     traceID,
 			RequestBody: string(bodyBytes),
-			IP:          c.ClientIP(),
+			IP:          utils.GetRealClientIP(c),
 			UserAgent:   c.GetHeader("User-Agent"),
 			StartTime:   time.Now(),
 		}
