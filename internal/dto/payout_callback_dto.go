@@ -4,8 +4,8 @@ import "github.com/shopspring/decimal"
 
 // PayoutHyperfOrderMessage 匹配 Hyperf 发送的消息格式
 type PayoutHyperfOrderMessage struct {
-	MOrderID    string          `json:"mOrderId"`    // 商户订单号
-	UpOrderID   string          `json:"upOrderId"`   // 平台流水号
+	MOrderID    string          `json:"mOrderId"`    // 平台交易订单号
+	UpOrderID   string          `json:"upOrderId"`   // 上游流水号
 	Amount      decimal.Decimal `json:"amount"`      // 金额
 	UpIpAddress string          `json:"upIpAddress"` // 上游供应商回调IP(不是PHP服务IP)
 	Status      string          `json:"status"`      // 状态
