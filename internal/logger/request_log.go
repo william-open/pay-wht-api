@@ -3,7 +3,9 @@ package logger
 import (
 	"fmt"
 	"log"
+	"strings"
 	"wht-order-api/internal/dal"
+	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
 	orderModel "wht-order-api/internal/model/order"
 	"wht-order-api/internal/notify"
@@ -35,13 +37,32 @@ func WriteOrderLog(payload *dto.AuditContextPayload) {
 		return
 	}
 	//TG 通知
-	if payload.Status == "failed" {
+	if strings.EqualFold(payload.Status, "failed") {
+		mainDao := dao.NewMainDao()
+		merchant, mErr := mainDao.GetMerchant(payload.MerchantNo)
+		var merchantTitle string
+		if mErr != nil {
+			merchantTitle = ""
+		} else {
+			merchantTitle = merchant.NickName
+		}
+		var requestType string
+		if strings.EqualFold(payload.RequestType, "payout") {
+			requestType = "代付"
+		} else if strings.EqualFold(payload.RequestType, "receive") {
+			requestType = "代收"
+		} else {
+			requestType = "未知"
+		}
 		// ⚠️ 失败发送通知 Telegram
-		notify.Notify(system.BotChatID, "warn", fmt.Sprintf("[%s]调用失败", payload.RequestType),
-			fmt.Sprintf("商户订单号: %s\n请求状态: %s\n商户号:%s\n请求参数: %s\n响应参数: %s",
+		notify.Notify(system.BotChatID, "warn", fmt.Sprintf("[%s]调用失败", requestType),
+			fmt.Sprintf("通道编码: %s\n商户订单号: %s\n请求状态: %s\n商户号:%s\n商户名称: %s\n请求IP: %s\n请求参数: %s\n响应参数: %s",
+				payload.ChannelCode,
 				payload.TranFlow,
-				payload.Status,
+				"失败",
 				payload.MerchantNo,
+				merchantTitle,
+				payload.IP,
 				utils.MapToJSON(payload.RequestBody),
 				utils.MapToJSON(payload.ResponseBody),
 			), true)
