@@ -11,15 +11,15 @@ type FlexibleMsg struct {
 	Text string
 }
 
+// UnmarshalJSON implements the json.Unmarshaler interface.
+// It supports decoding string, object and array structures into a readable string.
 func (m *FlexibleMsg) UnmarshalJSON(data []byte) error {
-	// 尝试解析为字符串
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		m.Text = s
 		return nil
 	}
 
-	// 尝试解析为 map 对象
 	var obj map[string]interface{}
 	if err := json.Unmarshal(data, &obj); err == nil {
 		parts := make([]string, 0)
@@ -38,7 +38,6 @@ func (m *FlexibleMsg) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// 尝试解析为数组
 	var arr []interface{}
 	if err := json.Unmarshal(data, &arr); err == nil {
 		b, _ := json.Marshal(arr)
@@ -46,7 +45,17 @@ func (m *FlexibleMsg) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	// 全部失败
 	m.Text = string(data)
 	return nil
+}
+
+// MarshalJSON implements the json.Marshaller interface.
+// It ensures FlexibleMsg is encoded as a plain string instead of {"Text":"..."}.
+func (m *FlexibleMsg) MarshalJSON() ([]byte, error) {
+	return json.Marshal(m.Text)
+}
+
+// String returns the inner text of FlexibleMsg.
+func (m *FlexibleMsg) String() string {
+	return m.Text
 }
