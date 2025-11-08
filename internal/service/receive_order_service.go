@@ -63,31 +63,38 @@ func (s *ReceiveOrderService) Shutdown() {
 }
 
 // 记录失败
-func (s *ReceiveOrderService) recordUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", upstreamFailKey, upstreamID)
+// 记录失败（带唯一通道维度）
+func (s *ReceiveOrderService) recordUpstreamFail(upstreamID uint64, upstreamName, upstreamCode, sysChannelCode string) {
+	key := fmt.Sprintf("%s%d:%s:%s", upstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	cnt, _ := dal.RedisClient.Incr(dal.RedisCtx, key).Result()
+
 	if cnt == 1 {
 		dal.RedisClient.Expire(dal.RedisCtx, key, 5*time.Minute)
 	}
+
+	// 通知逻辑
 	if cnt == 3 {
 		notify.Notify(system.BotChatID, "warn", "通道降权提醒",
-			fmt.Sprintf("⚠️ 上游通道 %d 在5分钟内失败 ≥3次，权重减半", upstreamID), false)
+			fmt.Sprintf("⚠️ 上游通道失败提醒\n上游供应商名称: *%s*\n上游供应商ID: `%d`\n上游供应商通道编码: `%s`\n系统通道编码: `%s`\n\n5分钟内失败 ≥3 次，权重减半。",
+				upstreamName, upstreamID, upstreamCode, sysChannelCode), false)
 	}
+
 	if cnt >= 10 {
 		notify.Notify(system.BotChatID, "error", "上游通道告警",
-			fmt.Sprintf("🚨 上游通道 %d 在5分钟内失败次数已达 %d 次", upstreamID, cnt), true)
+			fmt.Sprintf("🚨 上游通道连续失败\n上游供应商名称: *%s*\n上游供应商ID: `%d`\n上游供应商通道编码: `%s`\n系统通道编码: `%s`\n\n5分钟内失败次数已达 `%d` 次！",
+				upstreamName, upstreamID, upstreamCode, sysChannelCode, cnt), true)
 	}
 }
 
 // 清理失败计数
-func (s *ReceiveOrderService) clearUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", upstreamFailKey, upstreamID)
+func (s *ReceiveOrderService) clearUpstreamFail(upstreamID uint64, upstreamCode, sysChannelCode string) {
+	key := fmt.Sprintf("%s%d:%s:%s", upstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	dal.RedisClient.Del(dal.RedisCtx, key)
 }
 
 // 获取失败次数
-func (s *ReceiveOrderService) getUpstreamFailCount(upstreamID uint64) int {
-	key := fmt.Sprintf("%s%d", upstreamFailKey, upstreamID)
+func (s *ReceiveOrderService) getUpstreamFailCount(upstreamID uint64, upstreamCode, sysChannelCode string) int {
+	key := fmt.Sprintf("%s%d:%s:%s", upstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	val, _ := dal.RedisClient.Get(dal.RedisCtx, key).Result()
 	if val == "" {
 		return 0
@@ -194,7 +201,12 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 	for _, product := range products {
 		payUrl, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId)
 		if err == nil {
-			s.clearUpstreamFail(uint64(product.UpstreamId))
+			// 成功后清理
+			s.clearUpstreamFail(
+				uint64(product.UpstreamId),
+				product.UpstreamCode,
+				product.SysChannelCode,
+			)
 
 			// 异步更新订单绑定
 			go func(p dto.PayProductVo) {
@@ -214,7 +226,12 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 			break
 		}
 		// 当前上游失败
-		s.recordUpstreamFail(uint64(product.UpstreamId))
+		s.recordUpstreamFail(
+			uint64(product.UpstreamId),
+			product.UpstreamTitle,
+			product.UpstreamCode,
+			product.SysChannelCode, // ✅ 系统通道编码
+		)
 		go func(pid int64) {
 			if err := s.mainDao.UpdateSuccessRate(pid, false); err != nil {
 				log.Printf("[SUCCESS-RATE] ❌ 更新通道成功率失败: productID=%d, err=%v", pid, err)
@@ -265,7 +282,11 @@ func (s *ReceiveOrderService) selectWeightedPollingChannel(
 
 	// 动态降权（近5分钟失败≥3次则降半）
 	for i := range products {
-		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		failCnt := s.getUpstreamFailCount(
+			uint64(products[i].UpstreamId),
+			products[i].UpstreamCode,
+			products[i].SysChannelCode,
+		)
 		if failCnt >= 3 {
 			newWeight := int(math.Max(1, float64(products[i].UpstreamWeight/2)))
 			log.Printf("[WEIGHT-DECAY] 上游=%d 失败次数=%d, 权重降为 %d", products[i].UpstreamId, failCnt, newWeight)
@@ -541,7 +562,11 @@ func (s *ReceiveOrderService) selectPollingChannelWithRetry(
 		return nil, errors.New("no channel products available")
 	}
 	for i := range products {
-		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		failCnt := s.getUpstreamFailCount(
+			uint64(products[i].UpstreamId),
+			products[i].UpstreamCode,
+			products[i].SysChannelCode,
+		)
 		if failCnt >= 3 {
 			products[i].UpstreamWeight = max(1, products[i].UpstreamWeight/2)
 		}

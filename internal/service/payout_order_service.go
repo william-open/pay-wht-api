@@ -76,30 +76,46 @@ func (s *PayoutOrderService) Shutdown() {
 	s.cancel()
 }
 
-// ================== 上游失败监控 ==================
-func (s *PayoutOrderService) recordUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+// ================== 上游失败监控（多维度） ==================
+func (s *PayoutOrderService) recordUpstreamFail(upstreamID uint64, upstreamName, upstreamCode, sysChannelCode string) {
+	key := fmt.Sprintf("%s%d:%s:%s", payoutUpstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	cnt, _ := dal.RedisClient.Incr(dal.RedisCtx, key).Result()
 	if cnt == 1 {
 		dal.RedisClient.Expire(dal.RedisCtx, key, 5*time.Minute)
 	}
+
+	// 警告通知
 	if cnt == 3 {
 		notify.Notify(system.BotChatID, "warn", "代付通道降权提醒",
-			fmt.Sprintf("⚠️ 代付通道 %d 在5分钟内失败 ≥3次，权重减半", upstreamID), false)
+			fmt.Sprintf(
+				"⚠️ 代付通道失败提醒\n上游供应商名称: *%s*\n上游供应商ID: `%d`\n上游供应商通道编码: `%s`\n系统通道编码: `%s`\n\n5分钟内失败 ≥3 次，权重减半。",
+				upstreamName, upstreamID, upstreamCode, sysChannelCode,
+			),
+			false,
+		)
 	}
+
+	// 严重告警
 	if cnt >= 10 {
 		notify.Notify(system.BotChatID, "error", "代付通道告警",
-			fmt.Sprintf("🚨 代付通道 %d 在5分钟内失败次数已达 %d 次", upstreamID, cnt), true)
+			fmt.Sprintf(
+				"🚨 代付通道连续失败\n上游供应商名称: *%s*\n上游供应商ID: `%d`\n上游供应商通道编码=: `%s`\n系统通道编码: `%s`\n\n5分钟内失败次数已达 `%d` 次！",
+				upstreamName, upstreamID, upstreamCode, sysChannelCode, cnt,
+			),
+			true,
+		)
 	}
 }
 
-func (s *PayoutOrderService) clearUpstreamFail(upstreamID uint64) {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+// 清理失败计数
+func (s *PayoutOrderService) clearUpstreamFail(upstreamID uint64, upstreamCode, sysChannelCode string) {
+	key := fmt.Sprintf("%s%d:%s:%s", payoutUpstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	dal.RedisClient.Del(dal.RedisCtx, key)
 }
 
-func (s *PayoutOrderService) getUpstreamFailCount(upstreamID uint64) int {
-	key := fmt.Sprintf("%s%d", payoutUpstreamFailKey, upstreamID)
+// 获取失败次数
+func (s *PayoutOrderService) getUpstreamFailCount(upstreamID uint64, upstreamCode, sysChannelCode string) int {
+	key := fmt.Sprintf("%s%d:%s:%s", payoutUpstreamFailKey, upstreamID, upstreamCode, sysChannelCode)
 	val, _ := dal.RedisClient.Get(dal.RedisCtx, key).Result()
 	if val == "" {
 		return 0
@@ -117,7 +133,11 @@ func (s *PayoutOrderService) selectPollingChannels(
 		return nil, errors.New("no channel products available")
 	}
 	for i := range products {
-		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		failCnt := s.getUpstreamFailCount(
+			uint64(products[i].UpstreamId),
+			products[i].UpstreamCode,
+			products[i].SysChannelCode,
+		)
 		if failCnt >= 3 {
 			products[i].UpstreamWeight = max(1, products[i].UpstreamWeight/2)
 		}
@@ -250,7 +270,11 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		_, err = s.callUpstreamService(merchant, &req, &product, tx.UpOrderId, order)
 		if err == nil {
 			// ✅ 调用成功逻辑
-			s.clearUpstreamFail(uint64(product.UpstreamId))
+			s.clearUpstreamFail(
+				uint64(product.UpstreamId),
+				product.UpstreamCode,
+				product.SysChannelCode,
+			)
 			lastErr = nil
 
 			// ✅ 异步更新绑定（通道、费率、settle_snapshot）
@@ -287,8 +311,13 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 			}
 		}(product.ID)
 
-		// 记录失败计数
-		s.recordUpstreamFail(uint64(product.UpstreamId))
+		// 记录失败计数(多维度)
+		s.recordUpstreamFail(
+			uint64(product.UpstreamId),
+			product.UpstreamTitle,
+			product.UpstreamCode,
+			product.SysChannelCode,
+		)
 
 		// ⚠️ Telegram 通知
 		notify.Notify(system.BotChatID, "warn", "代付上游调用失败",
@@ -401,11 +430,15 @@ func (s *PayoutOrderService) selectWeightedPollingChannels(
 
 	// 2️⃣ 动态降权（5分钟失败≥3次则降半）
 	for i := range products {
-		failCnt := s.getUpstreamFailCount(uint64(products[i].UpstreamId))
+		failCnt := s.getUpstreamFailCount(
+			uint64(products[i].UpstreamId),
+			products[i].UpstreamCode,
+			products[i].SysChannelCode,
+		)
 		if failCnt >= 3 {
 			newWeight := int(math.Max(1, float64(products[i].UpstreamWeight/2)))
-			log.Printf("[WEIGHT-DECAY] payout 上游=%d 失败次数=%d, 权重降为 %d",
-				products[i].UpstreamId, failCnt, newWeight)
+			log.Printf("[WEIGHT-DECAY] payout 上游=%d code=%s sys=%s 失败次数=%d, 权重降为 %d",
+				products[i].UpstreamId, products[i].UpstreamCode, products[i].SysChannelCode, failCnt, newWeight)
 			products[i].UpstreamWeight = newWeight
 		}
 	}
