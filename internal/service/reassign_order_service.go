@@ -446,6 +446,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	upstreamRequest.BankName = bankName
 	upstreamRequest.BankCode = bankCode
 	upstreamRequest.UpstreamCode = payChannelProduct.UpstreamCode
+	upstreamRequest.UpstreamTitle = payChannelProduct.UpstreamTitle
 	upstreamRequest.QueryUrl = payChannelProduct.PayoutQueryApi
 	upstreamRequest.SubmitUrl = payChannelProduct.PayoutApi
 	upstreamRequest.Mode = "payout"

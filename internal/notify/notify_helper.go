@@ -42,6 +42,7 @@ func NotifyUpstreamAlert(
 	}
 
 	writeIf("接口编码", "providerKey")
+	writeIf("上游供应商", "upstreamTitle")
 	writeIf("上游商户号", "mchNo")
 	writeIf("上游产品", "payType")
 	writeIf("交易货币", "currency")
