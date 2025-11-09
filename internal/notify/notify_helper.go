@@ -47,8 +47,9 @@ func NotifyUpstreamAlert(
 	writeIf("上游产品", "payType")
 	writeIf("交易货币", "currency")
 	writeIf("交易金额", "amount")
-	writeIf("交易单号", "mchOrderId")
 	writeIf("支付方式", "payMethod")
+	writeIf("交易单号", "mchOrderId")
+	writeIf("商户单号", "downstreamOrderNo")
 
 	// ========== 额外信息（例如上游Code、Msg） ==========
 	if len(extra) > 0 {
