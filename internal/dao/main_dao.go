@@ -184,6 +184,70 @@ func (d *MainDao) GetMerchantAccount(mId string) (dto.MerchantMoney, error) {
 	return ch, nil
 }
 
+// FreezeAdditionalAmount 增加商户冻结金额（补差额）
+func (d *MainDao) FreezeAdditionalAmount(
+	uid uint64,
+	currency string,
+	orderNo string,
+	diff decimal.Decimal,
+	operator string,
+	mOrderNo string,
+) error {
+	if diff.LessThanOrEqual(decimal.Zero) {
+		return nil // 不需要补充冻结
+	}
+
+	// 事务保护
+	return dal.MainDB.Transaction(func(tx *gorm.DB) error {
+		var oldBalance, newFreeze decimal.Decimal
+
+		// 查询当前余额与冻结金额
+		var row struct {
+			Money       decimal.Decimal
+			FreezeMoney decimal.Decimal
+		}
+		sqlSelect := "SELECT money, freeze_money FROM w_merchant_money WHERE uid = ? AND currency = ? FOR UPDATE"
+		if err := tx.Raw(sqlSelect, uid, currency).Scan(&row).Error; err != nil {
+			return fmt.Errorf("query merchant account failed: %w", err)
+		}
+
+		oldBalance = row.FreezeMoney
+		newFreeze = oldBalance.Add(diff)
+
+		// 更新冻结金额
+		sqlUpdate := `
+			UPDATE w_merchant_money 
+			SET freeze_money = freeze_money + ?, update_time = NOW()
+			WHERE uid = ? AND currency = ?`
+		if err := tx.Exec(sqlUpdate, diff, uid, currency).Error; err != nil {
+			return fmt.Errorf("update freeze_money failed: %w", err)
+		}
+
+		// 插入资金日志
+		sqlLog := `
+			INSERT INTO w_money_log 
+			(uid, type, money, order_no, operator, currency, old_balance, balance, description, create_time, m_order_no)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		if err := tx.Exec(sqlLog,
+			uid,
+			7, // type=7 => 后台冻结（冻结补差）
+			diff,
+			orderNo,
+			operator,
+			currency,
+			oldBalance,
+			newFreeze,
+			"改派补充冻结",
+			time.Now(),
+			mOrderNo,
+		).Error; err != nil {
+			return fmt.Errorf("insert money log failed: %w", err)
+		}
+
+		return nil
+	})
+}
+
 // QueryUpstreamBankInfo 接口ID+平台银行编码+货币符号查询上游银行信息
 func (d *MainDao) QueryUpstreamBankInfo(interfaceId int, internalBankCode string, currency string) (dto.BankCodeMappingDto, error) {
 	if err := d.checkDB(); err != nil {

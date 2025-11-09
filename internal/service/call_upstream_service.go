@@ -223,18 +223,6 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	if !isSuccessCode(string(response.Code)) || string(response.Data.Code) != "0" {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
 
-		if req.Mode == "payout" {
-			rollbackErr := rollbackPayoutAmount(strconv.FormatUint(merchantId, 10), order, false)
-			if rollbackErr != nil {
-				notify.NotifyUpstreamAlert("warn", "代付上游交易错误", upstreamUrl, req, response, map[string]string{
-					"上游Code": string(response.Data.Code),
-					"上游Msg":  fmt.Sprintf("%v", response.Data.Msg),
-					"回滚结果":   fmt.Sprintf("%v", rollbackErr),
-				})
-				return "", "", "", rollbackErr
-			}
-		}
-
 		return "", "", "", fmt.Errorf("交易失败")
 	}
 
