@@ -481,7 +481,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	upstreamRequest.UpstreamTitle = payChannelProduct.UpstreamTitle
 	upstreamRequest.QueryUrl = payChannelProduct.PayoutQueryApi
 	upstreamRequest.SubmitUrl = payChannelProduct.PayoutApi
-	upstreamRequest.Mode = "payout"
+	upstreamRequest.Mode = "reassign"
 	upstreamRequest.ClientIp = req.ClientId
 	upstreamRequest.DownstreamOrderNo = req.TranFlow
 
@@ -540,12 +540,6 @@ func (s *ReassignOrderService) createTransaction(
 			return fmt.Errorf("create upstream transaction failed: %w", err)
 		}
 		tx = upTx
-		// 冻结商户资金
-		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
-		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), req.TranFlow, needFreezeAmount, merchant.NickName)
-		if freezeErr != nil {
-			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
-		}
 		return nil
 	})
 	if err != nil {
