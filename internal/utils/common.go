@@ -111,6 +111,8 @@ func ConvertOrderStatus(status int8) string {
 		statusStr = "0000"
 	case 3: //冲正退回
 		statusStr = "0005"
+	case 4: //已驳回
+		statusStr = "0006"
 	case 5: //下单失败
 		statusStr = "0003"
 	}
