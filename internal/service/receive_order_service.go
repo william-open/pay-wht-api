@@ -157,6 +157,11 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		if err != nil {
 			return resp, errors.New("admin test channel invalid")
 		}
+		// 检查金额是否在通道允许范围内
+		orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
+		if !utils.MatchOrderRange(amount, orderRange) {
+			return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount: %v,limit amount: %v", amount, orderRange)) // 金额不符合风控要求，跳过
+		}
 		products = []dto.PayProductVo{single}
 	} else {
 		if merchantChannelInfo.DispatchMode == 2 {
