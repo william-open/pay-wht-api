@@ -363,7 +363,7 @@ func (s *ReassignOrderService) updateReassignOrderInfo(
 			strconv.FormatUint(order.OrderID, 10),
 			order.MOrderID,
 			diff,
-			"改派补冻结差额",
+			merchant.NickName,
 		); err != nil {
 			msg := fmt.Sprintf(
 				"⚠️ 改派补冻结失败\n商户ID: `%d`\n订单号: `%s`\n原冻结: `%s`\n新冻结: `%s`\n差额: `%s`\n错误: `%v`",

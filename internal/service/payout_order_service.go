@@ -562,7 +562,7 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 			strconv.FormatUint(order.OrderID, 10),
 			order.MOrderID,
 			diff,
-			"系统补冻结差额",
+			merchant.NickName,
 		); err != nil {
 			// ⚠️ 告警通知
 			msg := fmt.Sprintf(
