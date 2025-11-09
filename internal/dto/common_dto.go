@@ -30,35 +30,36 @@ type NotifyMerchantPayload struct {
 
 // UpstreamRequest 请求上游供应商参数
 type UpstreamRequest struct {
-	MchNo         string `json:"mchNo" binding:"required"`          //商户号
-	ApiKey        string `json:"apiKey" binding:"required"`         //商户密钥
-	MchOrderId    string `json:"mchOrderId" binding:"required"`     //商家订单号
-	Amount        string `json:"amount" binding:"required"`         //交易金额
-	PayType       string `json:"payType" binding:"required"`        //通道编码/支付类型
-	NotifyUrl     string `json:"notifyUrl" binding:"omitempty,url"` //回调地址
-	RedirectUrl   string `json:"redirectUrl"`                       //成功跳转地址
-	Currency      string `json:"currency" binding:"required,len=3"` //货币符号
-	ProductInfo   string `json:"productInfo" binding:"required"`    //订单标题/内容
-	ProviderKey   string `json:"providerKey" binding:"required"`    //上游供应商对接编码
-	Model         string `json:"model" binding:"required"`          //模式:receive和payout
-	AccNo         string `json:"accNo"`                             //付款人账号
-	AccName       string `json:"accName"`                           //付款人姓名
-	PayEmail      string `json:"payEmail"`                          //付款人邮箱
-	PayPhone      string `json:"payPhone"`                          //付款人手机号
-	BankCode      string `json:"bankCode"`                          //付款人银行编码
-	BankName      string `json:"bankName"`                          //付款人银行名
-	IdentityType  string `json:"identityType"`                      //证件类型
-	IdentityNum   string `json:"identityNum"`                       //证件号
-	PayMethod     string `json:"payMethod"`                         //支付方式
-	Mode          string `json:"mode"`                              //模式 receive payout
-	UpstreamCode  string `json:"upstreamCode"`                      //上游供应商通道编码
-	UpstreamTitle string `json:"upstreamTitle"`                     //上游供应商名称
-	ClientIp      string `json:"clientIp"`                          //客户端IP地址
-	SubmitUrl     string `json:"submitUrl"`                         //下单URL
-	QueryUrl      string `json:"queryUrl"`                          //查单RL
-	AccountType   string `json:"accountType"`                       //账户类型
-	CciNo         string `json:"cciNo"`                             //银行间账户
-	Address       string `json:"address"`                           //客户地址
+	MchNo             string `json:"mchNo" binding:"required"`          //商户号
+	ApiKey            string `json:"apiKey" binding:"required"`         //商户密钥
+	MchOrderId        string `json:"mchOrderId" binding:"required"`     //商家订单号
+	Amount            string `json:"amount" binding:"required"`         //交易金额
+	PayType           string `json:"payType" binding:"required"`        //通道编码/支付类型
+	NotifyUrl         string `json:"notifyUrl" binding:"omitempty,url"` //回调地址
+	RedirectUrl       string `json:"redirectUrl"`                       //成功跳转地址
+	Currency          string `json:"currency" binding:"required,len=3"` //货币符号
+	ProductInfo       string `json:"productInfo" binding:"required"`    //订单标题/内容
+	ProviderKey       string `json:"providerKey" binding:"required"`    //上游供应商对接编码
+	Model             string `json:"model" binding:"required"`          //模式:receive和payout
+	AccNo             string `json:"accNo"`                             //付款人账号
+	AccName           string `json:"accName"`                           //付款人姓名
+	PayEmail          string `json:"payEmail"`                          //付款人邮箱
+	PayPhone          string `json:"payPhone"`                          //付款人手机号
+	BankCode          string `json:"bankCode"`                          //付款人银行编码
+	BankName          string `json:"bankName"`                          //付款人银行名
+	IdentityType      string `json:"identityType"`                      //证件类型
+	IdentityNum       string `json:"identityNum"`                       //证件号
+	PayMethod         string `json:"payMethod"`                         //支付方式
+	Mode              string `json:"mode"`                              //模式 receive payout
+	UpstreamCode      string `json:"upstreamCode"`                      //上游供应商通道编码
+	UpstreamTitle     string `json:"upstreamTitle"`                     //上游供应商名称
+	ClientIp          string `json:"clientIp"`                          //客户端IP地址
+	SubmitUrl         string `json:"submitUrl"`                         //下单URL
+	QueryUrl          string `json:"queryUrl"`                          //查单RL
+	AccountType       string `json:"accountType"`                       //账户类型
+	CciNo             string `json:"cciNo"`                             //银行间账户
+	Address           string `json:"address"`                           //客户地址
+	DownstreamOrderNo string `json:"downstreamOrderNo"`                 //下游商户订单号
 
 }
 

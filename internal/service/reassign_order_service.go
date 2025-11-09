@@ -476,6 +476,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	upstreamRequest.SubmitUrl = payChannelProduct.PayoutApi
 	upstreamRequest.Mode = "payout"
 	upstreamRequest.ClientIp = req.ClientId
+	upstreamRequest.DownstreamOrderNo = req.TranFlow
 
 	// 使用带超时的上下文
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
