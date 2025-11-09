@@ -327,7 +327,7 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 	return resp, nil
 }
 
-// updateReassignOrderInfo 改派成功后更新订单通道、费率、分润、结算信息
+// updateReassignOrderInfo 改派成功后更新订单通道、费率、分润、结算信息并调整冻结金额
 func (s *ReassignOrderService) updateReassignOrderInfo(
 	order *ordermodel.MerchantPayOutOrderM,
 	merchant *mainmodel.Merchant,
@@ -339,18 +339,62 @@ func (s *ReassignOrderService) updateReassignOrderInfo(
 		return errors.New("order cannot be nil")
 	}
 
-	// 计算成本、商户手续费、利润
+	now := time.Now()
+	orderTable := shard.OutOrderShard.GetTable(order.OrderID, now)
+
+	// ==================== 1️⃣ 重新计算费率与利润 ====================
 	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100)).Add(product.CostFee)
 	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100)).Add(product.MSingleFee)
 	profit := orderFee.Sub(costFee)
 
-	orderTable := shard.OutOrderShard.GetTable(order.OrderID, time.Now())
+	// ==================== 2️⃣ 计算新冻结金额 ====================
+	newFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
+	oldFreeze := order.FreezeAmount
+	diff := newFreezeAmount.Sub(oldFreeze)
 
+	// ==================== 3️⃣ 差额补冻结逻辑 ====================
+	if diff.GreaterThan(decimal.Zero) {
+		log.Printf("[REASSIGN-FREEZE-ADJUST] 检测到改派通道冻结金额更高，补冻结差额: %s (旧=%s, 新=%s)",
+			diff.StringFixed(4), oldFreeze.StringFixed(4), newFreezeAmount.StringFixed(4))
+
+		if err := s.mainDao.FreezePayout(
+			merchant.MerchantID,
+			product.Currency,
+			strconv.FormatUint(order.OrderID, 10),
+			order.MOrderID,
+			diff,
+			"改派补冻结差额",
+		); err != nil {
+			msg := fmt.Sprintf(
+				"⚠️ 改派补冻结失败\n商户ID: `%d`\n订单号: `%s`\n原冻结: `%s`\n新冻结: `%s`\n差额: `%s`\n错误: `%v`",
+				merchant.MerchantID,
+				order.MOrderID,
+				oldFreeze.StringFixed(4),
+				newFreezeAmount.StringFixed(4),
+				diff.StringFixed(4),
+				err,
+			)
+			log.Printf("[REASSIGN-FREEZE-ADJUST][FAIL] %v", msg)
+			notify.Notify(system.BotChatID, "warn", "改派补冻结失败", msg, true)
+		} else {
+			log.Printf("[REASSIGN-FREEZE-ADJUST] ✅ 成功补冻结 %.4f 元", diff)
+			notify.Notify(system.BotChatID, "info", "改派补冻结成功",
+				fmt.Sprintf("订单号: `%d`\n补冻结金额: `%s`\n通道: `%s/%s`",
+					order.OrderID, diff.StringFixed(4), product.SysChannelCode, product.UpstreamCode), false)
+		}
+	} else if diff.LessThan(decimal.Zero) {
+		// ⚠️ 新通道冻结金额更低：不退差额，只打印日志
+		log.Printf("[REASSIGN-FREEZE-ADJUST] 新通道冻结金额更低 (旧=%s, 新=%s)，不退差额。",
+			oldFreeze.StringFixed(4), newFreezeAmount.StringFixed(4))
+	}
+
+	// ==================== 4️⃣ 更新订单信息 ====================
 	updateData := map[string]interface{}{
 		"supplier_id":      product.UpstreamId,
 		"channel_id":       product.SysChannelID,
 		"up_channel_id":    product.ID,
 		"channel_code":     product.SysChannelCode,
+		"channel_title":    product.SysChannelTitle,
 		"up_channel_code":  product.UpstreamCode,
 		"up_channel_title": product.UpChannelTitle,
 		"m_rate":           product.MDefaultRate,
@@ -360,15 +404,36 @@ func (s *ReassignOrderService) updateReassignOrderInfo(
 		"fees":             settle.MerchantTotalFee,
 		"cost":             costFee,
 		"profit":           profit,
+		"freeze_amount":    newFreezeAmount,
 		"settle_snapshot":  ordermodel.PayoutSettleSnapshot(settle),
-		"status":           1, // 成功状态
-		"update_time":      time.Now(),
+		"status":           1,
+		"remark":           fmt.Sprintf("改派成功→%s/%s %s", product.SysChannelCode, product.UpstreamCode, now.Format("15:04:05")),
+		"update_time":      now,
 	}
 
 	if err := s.orderDao.UpdateByWhere(orderTable, map[string]interface{}{
 		"order_id": order.OrderID,
 	}, updateData); err != nil {
+		log.Printf("[WARN] 改派订单更新失败: %v", err)
 		return fmt.Errorf("update order channel info failed: %w", err)
+	}
+
+	log.Printf("[REASSIGN-ORDER-UPDATE] ✅ 改派订单更新成功 order=%d 通道=%s/%s 新冻结=%s",
+		order.OrderID, product.SysChannelCode, product.UpstreamCode, newFreezeAmount.StringFixed(4))
+
+	// ==================== 5️⃣ 更新上游交易表 ====================
+	txTable := shard.UpOutOrderShard.GetTable(*order.UpOrderID, now)
+	updateTx := map[string]interface{}{
+		"supplier_id": product.UpstreamId,
+		"currency":    product.Currency,
+		"update_time": now,
+	}
+	if err := dal.OrderDB.Table(txTable).
+		Where("order_id = ? AND up_order_id = ?", order.OrderID, order.UpOrderID).
+		Updates(updateTx).Error; err != nil {
+		log.Printf("[WARN] update payout upstream tx failed: %v", err)
+	} else {
+		log.Printf("[REASSIGN-TX-UPDATE] ✅ 上游交易同步完成 order=%d supplier=%d", order.OrderID, product.UpstreamId)
 	}
 
 	return nil

@@ -334,8 +334,43 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 			), true)
 	}
 
+	//// ❌ 所有上游均失败
+	//if lastErr != nil {
+	//	resp = dto.CreatePayoutOrderResp{
+	//		PaySerialNo: strconv.FormatUint(oid, 10),
+	//		TranFlow:    req.TranFlow,
+	//		SysTime:     time.Now().Format(time.RFC3339),
+	//		Amount:      req.Amount,
+	//		Code:        "001",
+	//	}
+	//	return resp, lastErr
+	//}
+
 	// ❌ 所有上游均失败
 	if lastErr != nil {
+		orderTable := shard.OutOrderShard.GetTable(order.OrderID, now)
+		update := map[string]interface{}{
+			"status":      6, // 人工处理
+			"remark":      fmt.Sprintf("所有上游均失败, 等待人工介入: %v", lastErr),
+			"update_time": time.Now(),
+		}
+		if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", order.OrderID).Updates(update).Error; err != nil {
+			log.Printf("[WARN] 更新订单状态失败 order=%d err=%v", order.OrderID, err)
+		}
+
+		// ✅ Telegram 告警推送
+		notify.Notify(system.BotChatID, "error", "⚠️ 所有上游均失败",
+			fmt.Sprintf(
+				"💀 代付订单所有上游调用失败\n订单号: `%d`\n商户号: `%s`\n金额: `%s`\n通道: `%s`\n错误: `%v`\n\n当前资金已冻结，请人工处理。",
+				order.OrderID,
+				req.MerchantNo,
+				req.Amount,
+				req.PayType,
+				lastErr,
+			),
+			true,
+		)
+
 		resp = dto.CreatePayoutOrderResp{
 			PaySerialNo: strconv.FormatUint(oid, 10),
 			TranFlow:    req.TranFlow,
@@ -490,6 +525,9 @@ func (s *PayoutOrderService) selectWeightedPollingChannels(
 }
 
 // updatePayoutOrderBindOnSuccess 成功后更新订单绑定、费率、成本、利润、settle_snapshot
+// updatePayoutOrderBindOnSuccess
+// 通道调用成功后：更新订单绑定信息 + settle 快照 + 成本利润 + 补冻结差额（若费率更高）
+// 确保订单冻结资金与新通道成本保持一致，防止资金不足。
 func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 	order *ordermodel.MerchantPayOutOrderM,
 	upTx *ordermodel.PayoutUpstreamTxM,
@@ -498,25 +536,65 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 	amount decimal.Decimal,
 	now time.Time,
 ) error {
+
 	// 1️⃣ 重新计算结算信息
 	settle, err := s.calculateSettlement(merchant, product, amount)
 	if err != nil {
 		return fmt.Errorf("recalculate payout settlement failed: %w", err)
 	}
 
-	// 2️⃣ 重新计算费用结构
+	// 2️⃣ 重新计算费率结构
 	costFee := amount.Mul(product.CostRate).Div(decimal.NewFromInt(100)).Add(product.CostFee)
 	orderFee := amount.Mul(product.MDefaultRate).Div(decimal.NewFromInt(100)).Add(product.MSingleFee)
 	profitFee := orderFee.Sub(costFee)
-	orderFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
+	newFreezeAmount := amount.Add(settle.MerchantTotalFee).Add(settle.AgentTotalFee)
 
-	// 3️⃣ 拷贝结算快照
+	// 3️⃣ 检查是否需要补冻结差额
+	diff := newFreezeAmount.Sub(order.FreezeAmount)
+	if diff.GreaterThan(decimal.Zero) {
+		log.Printf("[PAYOUT-FREEZE-ADJUST] 检测到新通道冻结金额更高，补冻结差额: %s (旧=%s, 新=%s)",
+			diff.StringFixed(4), order.FreezeAmount.StringFixed(4), newFreezeAmount.StringFixed(4))
+
+		// ✅ 调用 mainDao.FreezePayout 进行补冻结
+		if err := s.mainDao.FreezePayout(
+			merchant.MerchantID,
+			order.Currency,
+			strconv.FormatUint(order.OrderID, 10),
+			order.MOrderID,
+			diff,
+			"系统补冻结差额",
+		); err != nil {
+			// ⚠️ 告警通知
+			msg := fmt.Sprintf(
+				"⚠️ 代付补冻结失败\n商户ID: `%d`\n订单号: `%d`\n原冻结: `%s`\n新冻结: `%s`\n差额: `%s`\n错误: `%v`",
+				merchant.MerchantID,
+				order.OrderID,
+				order.FreezeAmount.StringFixed(4),
+				newFreezeAmount.StringFixed(4),
+				diff.StringFixed(4),
+				err,
+			)
+			log.Printf("[PAYOUT-FREEZE-ADJUST][FAIL] %v", msg)
+			notify.Notify(system.BotChatID, "warn", "代付补冻结失败", msg, true)
+		} else {
+			log.Printf("[PAYOUT-FREEZE-ADJUST] ✅ 成功补冻结 %.4f 元", diff)
+			notify.Notify(system.BotChatID, "info", "代付补冻结成功",
+				fmt.Sprintf("订单号: `%d`\n补冻结金额: `%s`\n通道: `%s/%s`",
+					order.OrderID, diff.StringFixed(4), product.SysChannelCode, product.UpstreamCode), false)
+		}
+	} else if diff.LessThan(decimal.Zero) {
+		// ⚠️ 新通道冻结金额更低 —— 不退回差额，只打印日志留痕
+		log.Printf("[PAYOUT-FREEZE-ADJUST] 新通道冻结金额更低 (旧=%s, 新=%s)，不退差额。",
+			order.FreezeAmount.StringFixed(4), newFreezeAmount.StringFixed(4))
+	}
+
+	// 4️⃣ 构造结算快照（防止 JSON 混乱）
 	var orderSettle dto.SettlementResult
 	if err := copier.Copy(&orderSettle, &settle); err != nil {
 		return fmt.Errorf("copy payout settlement snapshot failed: %w", err)
 	}
 
-	// 4️⃣ 更新订单表
+	// 5️⃣ 更新订单绑定信息（费率、成本、利润、settle_snapshot、冻结金额）
 	orderTable := shard.OutOrderShard.GetTable(order.OrderID, now)
 	updateOrder := map[string]interface{}{
 		"supplier_id":      product.UpstreamId,
@@ -534,9 +612,10 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 		"country":          product.Country,
 		"cost":             costFee,
 		"profit":           profitFee,
-		"freeze_amount":    orderFreezeAmount,
+		"freeze_amount":    newFreezeAmount,
 		"settle_snapshot":  ordermodel.PayoutSettleSnapshot(orderSettle),
 		"update_time":      now,
+		"remark":           fmt.Sprintf("通道成功切换为: %s/%s", product.SysChannelCode, product.UpstreamCode),
 	}
 
 	if err := dal.OrderDB.Table(orderTable).
@@ -545,7 +624,10 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 		return fmt.Errorf("update payout order bind failed: %w", err)
 	}
 
-	// 5️⃣ 更新上游交易表
+	log.Printf("[PAYOUT-BIND-UPDATE] ✅ 订单绑定信息已更新 order=%d 通道=%s/%s 冻结金额=%s",
+		order.OrderID, product.SysChannelCode, product.UpstreamCode, newFreezeAmount.StringFixed(4))
+
+	// 6️⃣ 更新上游交易表（同步供应商信息）
 	if upTx != nil {
 		txTable := shard.UpOutOrderShard.GetTable(upTx.UpOrderId, now)
 		updateTx := map[string]interface{}{
@@ -556,7 +638,9 @@ func (s *PayoutOrderService) updatePayoutOrderBindOnSuccess(
 		if err := dal.OrderDB.Table(txTable).
 			Where("order_id = ? AND up_order_id = ?", upTx.OrderID, upTx.UpOrderId).
 			Updates(updateTx).Error; err != nil {
-			return fmt.Errorf("update payout upstream tx failed: %w", err)
+			log.Printf("[WARN] update payout upstream tx failed: %v", err)
+		} else {
+			log.Printf("[PAYOUT-TX-UPDATE] ✅ 上游交易同步完成 order=%d supplier=%d", upTx.OrderID, product.UpstreamId)
 		}
 	}
 
