@@ -129,25 +129,26 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 		return fmt.Errorf(notifyMsg)
 	}
 
-	// 7) 结算逻辑
-	settleService := settlement.NewSettlement()
-	settlementResult := dto.SettlementResult(order.SettleSnapshot)
-
+	// 7) 结算逻辑: 成功时结算资金，失败时进入人工流程，不进行资金操作
 	statusText := s.payoutConvertStatus(msg.Status)
-
 	isSuccess := statusText == "SUCCESS"
 
-	if err := settleService.DoPayoutSettlement(settlementResult,
-		strconv.FormatUint(merchant.MerchantID, 10),
-		order.OrderID,
-		order.MOrderID,
-		isSuccess,
-		order.Amount,
-	); err != nil {
-		notifyMsg := fmt.Sprintf("结算失败\n交易订单号: %v\n平台订单号: %v\n商户订单号: %v\n错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
-		notify.Notify(system.BotChatID, "warn", "代付回调商户",
-			notifyMsg, true)
-		return fmt.Errorf(notifyMsg)
+	// 成功时结算资金
+	if isSuccess {
+		settleService := settlement.NewSettlement()
+		settlementResult := dto.SettlementResult(order.SettleSnapshot)
+		if err := settleService.DoPayoutSettlement(settlementResult,
+			strconv.FormatUint(merchant.MerchantID, 10),
+			order.OrderID,
+			order.MOrderID,
+			isSuccess,
+			order.Amount,
+		); err != nil {
+			notifyMsg := fmt.Sprintf("结算失败\n交易订单号: %v\n平台订单号: %v\n商户订单号: %v\n错误: %v", mOrderIdNum, order.OrderID, order.MOrderID, err)
+			notify.Notify(system.BotChatID, "warn", "代付回调商户",
+				notifyMsg, true)
+			return fmt.Errorf(notifyMsg)
+		}
 	}
 
 	// 8) 异步统计（仅成功时）
@@ -185,7 +186,7 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	}
 	//代付订单失败不直接给商户推送消息
 	if statusText == "FAIL" {
-		notifyMsg := fmt.Sprintf("[代付回调] 订单代付失败，不自动进行商户推送，进入人工流程\n交易订单号: %v\n平台订单号: %v\n商户订单号:%v\n订单状态: %s", mOrderIdNum, order.OrderID, order.MOrderID, statusText)
+		notifyMsg := fmt.Sprintf("[代付回调] 订单代付失败，不自动进行商户推送，进入人工改派流程\n交易订单号: %v\n平台订单号: %v\n商户订单号:%v\n订单状态: %s", mOrderIdNum, order.OrderID, order.MOrderID, statusText)
 		log.Printf(notifyMsg)
 		notify.Notify(system.BotChatID, "warn", "[代付回调]",
 			notifyMsg, true)

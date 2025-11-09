@@ -210,7 +210,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		// 检查金额是否在通道允许范围内
 		orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
 		if !utils.MatchOrderRange(amount, orderRange) {
-			return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount:%v,limit amount:%s", amount, orderRange)) // 金额不符合风控要求，跳过
+			return resp, errors.New(fmt.Sprintf("admin test the amount does not meet the risk control requirements.order amount: %v,limit amount: %v", amount, orderRange)) // 金额不符合风控要求，跳过
 		}
 		products = []dto.PayProductVo{single}
 	} else {
@@ -251,7 +251,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 	// 9 商户余额
 	merchantMoney, mmErr := s.mainDao.GetMerchantAccount(strconv.FormatUint(merchant.MerchantID, 10))
 	if mmErr != nil || merchantMoney.Money.LessThan(amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)) {
-		return resp, errors.New("merchant insufficient balance")
+		return resp, errors.New("merchant insufficient balance [商户余额不足]")
 	}
 	// 10 创建订单
 	now := time.Now()
@@ -745,7 +745,7 @@ func (s *PayoutOrderService) createOrderAndTransaction(
 		needFreezeAmount := amount.Add(settle.AgentTotalFee).Add(settle.MerchantTotalFee)
 		freezeErr := s.freezePayout(merchant.MerchantID, payChannelProduct.Currency, strconv.FormatUint(oid, 10), req.TranFlow, needFreezeAmount, merchant.NickName)
 		if freezeErr != nil {
-			return fmt.Errorf("freeze merchant money failed: %w", freezeErr)
+			return fmt.Errorf("freeze merchant money failed[冻结商户金额失败]: %w", freezeErr)
 		}
 		return nil
 	})
@@ -780,7 +780,7 @@ func (s *PayoutOrderService) freezePayout(uid uint64, currency string, orderNo s
 
 	err := s.mainDao.FreezePayout(uid, currency, orderNo, mOrderNo, amount, operator)
 	if err != nil {
-		return fmt.Errorf("freeze merchant money failed: %w", err)
+		return fmt.Errorf("freeze merchant money failed[冻结商户金额失败]: %w", err)
 	}
 	return nil
 }
@@ -801,7 +801,7 @@ func (s *PayoutOrderService) createOrder(
 		return fmt.Errorf("copy settlement failed: %w", err)
 	}
 
-	log.Printf(">>>支付产品信息:%+v", payChannelProduct)
+	//log.Printf(">>>支付产品信息:%+v", payChannelProduct)
 	costFee := amount.Mul(payChannelProduct.CostRate).Div(decimal.NewFromInt(100)) //上游成本费用
 	costFee = costFee.Add(payChannelProduct.CostFee)
 	orderFee := amount.Mul(payChannelProduct.MDefaultRate).Div(decimal.NewFromInt(100)) //商户手续费
@@ -853,7 +853,7 @@ func (s *PayoutOrderService) createOrder(
 
 	table := shard.OutOrderShard.GetTable(oid, now)
 	if err := orderDao.Insert(table, m); err != nil {
-		return fmt.Errorf("insert order failed: %w", err)
+		return fmt.Errorf("insert order failed[创建订单失败]: %w", err)
 	}
 
 	return nil
@@ -882,7 +882,7 @@ func (s *PayoutOrderService) calculateSettlement(merchant *mainmodel.Merchant, p
 
 		agentInfo, err := s.mainDao.GetAgentMerchant(agentMerchant)
 		if err != nil {
-			log.Printf("get agent merchant failed: %v", err)
+			log.Printf("get agent merchant failed[获取代理商户失败]: %v", err)
 			// 不返回错误，继续使用零值
 		} else if agentInfo != nil && agentInfo.Status == 1 {
 			agentPct = agentInfo.DefaultRate
@@ -892,7 +892,7 @@ func (s *PayoutOrderService) calculateSettlement(merchant *mainmodel.Merchant, p
 
 	// 验证费率有效性
 	if payChannelProduct.MDefaultRate.IsNegative() || payChannelProduct.CostRate.IsNegative() {
-		return dto.SettlementResult{}, errors.New("invalid rate value")
+		return dto.SettlementResult{}, errors.New("invalid rate value[无效的费率值]")
 	}
 
 	// 计算结算费用
@@ -935,7 +935,7 @@ func (s *PayoutOrderService) createUpstreamTx(
 	}
 
 	if err := orderDao.InsertTx(txTable, tx); err != nil {
-		return nil, fmt.Errorf("insert transaction failed: %w", err)
+		return nil, fmt.Errorf("insert transaction failed[创建交易订单失败]: %w", err)
 	}
 
 	// 更新订单表
@@ -947,7 +947,7 @@ func (s *PayoutOrderService) createUpstreamTx(
 
 	orderTable := shard.OutOrderShard.GetTable(oid, now)
 	if err := orderDao.UpdateOrder(orderTable, updateOrder); err != nil {
-		return nil, fmt.Errorf("update order failed: %w", err)
+		return nil, fmt.Errorf("update order failed[更新订单失败]: %w", err)
 	}
 
 	return tx, nil
@@ -975,7 +975,7 @@ func (s *PayoutOrderService) createOrderIndex(
 	}
 
 	if err := orderDao.InsertPayoutOrderIndexTable(receiveIndexTable, receiveIndex); err != nil {
-		return fmt.Errorf("insert order index failed: %w", err)
+		return fmt.Errorf("insert order index failed[创建订单索引映射失败]: %w", err)
 	}
 
 	return nil
