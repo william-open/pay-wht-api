@@ -10,14 +10,12 @@ import (
 	"strings"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dto"
-	orderModel "wht-order-api/internal/model/order"
 	"wht-order-api/internal/notify"
-	"wht-order-api/internal/settlement"
 	"wht-order-api/internal/utils"
 )
 
 // CallUpstreamReceiveService 调用上游服务下单 - 代收
-func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (string, string, string, error) {
+func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest, mchReq *dto.CreateOrderReq) (string, string, string, error) {
 	ctxTimeout, cancel := context.WithTimeout(ctx, config.C.Upstream.Timeout.Receive)
 	defer cancel()
 
@@ -55,7 +53,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	// ✅ 健康检查
 	if err := utils.CheckUpstreamHealth(ctxTimeout, upstreamUrl); err != nil {
 		log.Printf("[Upstream-Receive] 健康检查失败: %v", err)
-		notify.NotifyUpstreamAlert("warn", "代收上游不可用", upstreamUrl, req, nil, map[string]string{
+		notify.NotifyUpstreamAlert("warn", "代收上游不可用", upstreamUrl, mchReq, params, nil, map[string]string{
 			"错误": err.Error(),
 		})
 		return "", "", "", fmt.Errorf("上游服务不可用")
@@ -73,7 +71,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	})
 	if err != nil {
 		log.Printf("[Upstream-Receive] 请求失败(重试后仍失败): %v", err)
-		notify.NotifyUpstreamAlert("error", "代收上游请求失败(重试后仍失败)", upstreamUrl, req, resp, map[string]string{
+		notify.NotifyUpstreamAlert("error", "代收上游请求失败(重试后仍失败)", upstreamUrl, mchReq, params, resp, map[string]string{
 			"错误":   err.Error(),
 			"重试次数": strconv.Itoa(config.C.Upstream.Retry.Times),
 		})
@@ -97,7 +95,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 
 	if respErr := json.Unmarshal([]byte(resp), &response); respErr != nil {
 		log.Printf("[Upstream-Receive] JSON解析失败: %v", respErr)
-		notify.NotifyUpstreamAlert("error", "代收上游响应解析失败", upstreamUrl, req, resp, map[string]string{
+		notify.NotifyUpstreamAlert("error", "代收上游响应解析失败", upstreamUrl, mchReq, params, resp, map[string]string{
 			"错误": respErr.Error(),
 		})
 		return "", "", "", fmt.Errorf("上游响应解析失败")
@@ -106,7 +104,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 	// ✅ 判断响应成功
 	if !isSuccessCode(string(response.Code)) || string(response.Data.Code) != "0" {
 		log.Printf("[Upstream-Receive] 上游返回错误: data.code=%s, data.msg=%s", response.Data.Code, response.Data.Msg)
-		notify.NotifyUpstreamAlert("warn", "代收上游交易错误", upstreamUrl, req, response, map[string]string{
+		notify.NotifyUpstreamAlert("warn", "代收上游交易错误", upstreamUrl, mchReq, params, response, map[string]string{
 			"上游Code": string(response.Data.Code),
 			"上游Msg":  fmt.Sprintf("%v", response.Data.Msg),
 		})
@@ -115,7 +113,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 
 	if response.Data.PayUrl == "" || !isValidURL(response.Data.PayUrl) {
 		log.Printf("[Upstream-Receive] 上游返回错误: payUrl 无效")
-		notify.NotifyUpstreamAlert("warn", "代收上游返回无效支付链接", upstreamUrl, req, response, nil)
+		notify.NotifyUpstreamAlert("warn", "代收上游返回无效支付链接", upstreamUrl, mchReq, params, response, nil)
 		return "", "", "", fmt.Errorf("交易失败")
 	}
 
@@ -126,7 +124,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest) (s
 }
 
 // CallUpstreamPayoutService 调用上游服务下单 - 代付
-func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, merchantId uint64, order *orderModel.MerchantPayOutOrderM) (string, string, string, error) {
+func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mchReq *dto.CreatePayoutOrderReq) (string, string, string, error) {
 	ctxTimeout, cancel := context.WithTimeout(ctx, config.C.Upstream.Timeout.Payout)
 	defer cancel()
 
@@ -168,7 +166,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	// ✅ 健康检查
 	if err := utils.CheckUpstreamHealth(ctxTimeout, upstreamUrl); err != nil {
 		log.Printf("[Upstream-Payout] 健康检查失败: %v", err)
-		notify.NotifyUpstreamAlert("warn", "代付上游不可用", upstreamUrl, req, nil, map[string]string{
+		notify.NotifyUpstreamAlert("warn", "代付上游不可用", upstreamUrl, mchReq, params, nil, map[string]string{
 			"错误": err.Error(),
 		})
 		return "", "", "", fmt.Errorf("上游服务不可用")
@@ -186,7 +184,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	})
 	if err != nil {
 		log.Printf("[Upstream-Payout] 请求失败(重试后仍失败): %v", err)
-		notify.NotifyUpstreamAlert("error", "代付上游请求失败(重试后仍失败)", upstreamUrl, req, resp, map[string]string{
+		notify.NotifyUpstreamAlert("error", "代付上游请求失败(重试后仍失败)", upstreamUrl, mchReq, params, resp, map[string]string{
 			"错误":   err.Error(),
 			"重试次数": strconv.Itoa(config.C.Upstream.Retry.Times),
 		})
@@ -213,7 +211,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 
 	if err := json.Unmarshal([]byte(resp), &response); err != nil {
 		log.Printf("[Upstream-Payout] JSON解析失败: %v", err)
-		notify.NotifyUpstreamAlert("error", "代付上游响应解析失败", upstreamUrl, req, resp, map[string]string{
+		notify.NotifyUpstreamAlert("error", "代付上游响应解析失败", upstreamUrl, mchReq, params, resp, map[string]string{
 			"错误": err.Error(),
 		})
 		return "", "", "", fmt.Errorf("上游响应解析失败")
@@ -222,7 +220,10 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 	// ✅ 响应检查
 	if !isSuccessCode(string(response.Code)) || string(response.Data.Code) != "0" {
 		log.Printf("[Upstream-Payout] 上游返回错误: code=%v, msg=%s", response.Code, response.Msg)
-
+		notify.NotifyUpstreamAlert("warn", "代付上游交易错误", upstreamUrl, mchReq, params, response, map[string]string{
+			"上游Code": string(response.Data.Code),
+			"上游Msg":  fmt.Sprintf("%v", response.Data.Msg),
+		})
 		return "", "", "", fmt.Errorf("交易失败")
 	}
 
@@ -230,22 +231,6 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mer
 		response.Data.UpOrderNo, response.Data.MOrderId, response.Data.Status)
 
 	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
-}
-
-// 代付失败，回滚资金
-func rollbackPayoutAmount(merchantId string, order *orderModel.MerchantPayOutOrderM, isSuccess bool) error {
-	settleService := settlement.NewSettlement()
-	settlementResult := dto.SettlementResult(order.SettleSnapshot)
-	if err := settleService.DoPayoutSettlement(settlementResult,
-		merchantId,
-		order.OrderID,
-		order.MOrderID,
-		isSuccess,
-		order.Amount,
-	); err != nil {
-		return fmt.Errorf("[ROLLBACK-PAYOUT] 回滚失败 OrderID=%v, err=%w", order.OrderID, err)
-	}
-	return nil
 }
 
 // isSuccessCode 检查响应码是否为成功（支持字符串和数字类型）
