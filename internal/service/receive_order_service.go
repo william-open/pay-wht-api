@@ -945,7 +945,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 	defer cancel()
 
 	// 调用上游服务
-	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(ctx, upstreamRequest)
+	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(ctx, upstreamRequest, req)
 	if err != nil {
 		return "", err
 	}
