@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"log"
 	"net/url"
 	"strconv"
@@ -172,6 +173,26 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mch
 		return "", "", "", fmt.Errorf("上游服务不可用")
 	}
 
+	// ✅ 查询上游余额
+	balance, queryErr := CheckUpstreamBalance(ctxTimeout, req, mchReq)
+	if queryErr != nil {
+		log.Printf("[Upstream-Payout] ❌ 查询上游余额失败: %v", queryErr)
+		notify.NotifyUpstreamAlert("error", "代付上游余额查询失败", req.QueryUrl, mchReq, req, nil, map[string]string{
+			"错误": queryErr.Error(),
+		})
+		return "", "", "", fmt.Errorf("查询上游余额失败: %v", queryErr)
+	}
+
+	log.Printf("[Upstream-Payout] 上游余额: %.2f, 代付金额: %.2f", balance, req.Amount)
+	if !balanceGreaterThanOrder(req.Amount, balance) {
+		log.Printf("[Upstream-Payout] ⚠️ 上游余额不足，跳过下单")
+		notify.NotifyUpstreamAlert("warn", "代付上游余额不足", req.QueryUrl, mchReq, req, nil, map[string]string{
+			"上游余额": fmt.Sprintf("%.2f", balance),
+			"代付金额": fmt.Sprintf("%.2f", req.Amount),
+		})
+		return "", "", "", fmt.Errorf("上游余额不足")
+	}
+
 	// ✅ 带重试逻辑
 	var resp string
 	err := utils.DoWithRetry(ctxTimeout, config.C.Upstream.Retry.Times, config.C.Upstream.Retry.Interval, func() error {
@@ -231,6 +252,67 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mch
 		response.Data.UpOrderNo, response.Data.MOrderId, response.Data.Status)
 
 	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
+}
+
+// CheckUpstreamBalance 查询上游余额接口
+func CheckUpstreamBalance(ctx context.Context, req dto.UpstreamRequest, mchReq *dto.CreatePayoutOrderReq) (decimal.Decimal, error) {
+	upstreamBalanceUrl := config.C.Upstream.BalanceApiUrl
+	if upstreamBalanceUrl == "" {
+		return decimal.Zero, fmt.Errorf("未配置上游余额查询地址")
+	}
+
+	params := map[string]interface{}{
+		"mchNo":       req.MchNo,
+		"apiKey":      req.ApiKey,
+		"providerKey": req.ProviderKey,
+	}
+
+	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamBalanceUrl, params)
+	if err != nil {
+		return decimal.Zero, fmt.Errorf("请求上游余额接口失败: %v", err)
+	}
+
+	var result struct {
+		Code utils.StringOrNumber `json:"code"`
+		Msg  utils.FlexibleMsg    `json:"msg"`
+		Data struct {
+			Amount          string               `json:"amount"`
+			FrozenAmount    string               `json:"frozenAmount"`
+			AvailableAmount string               `json:"availableAmount"`
+			Code            utils.StringOrNumber `json:"code"` // code编码 实际判断的字段
+			Msg             utils.FlexibleMsg    `json:"msg"`  // 上游返回错误信息
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		return decimal.Zero, fmt.Errorf("解析上游余额响应失败: %v", err)
+	}
+
+	if !isSuccessCode(string(result.Code)) || string(result.Data.Code) != "0" {
+		return decimal.Zero, fmt.Errorf("上游返回错误: %v", result.Msg)
+	}
+	amount, err := decimal.NewFromString(result.Data.AvailableAmount)
+	if err != nil {
+		log.Printf("[Upstream-Query-Balance] 查询上游商户余额解析错误: amount=%v, msg=%v", amount, err)
+		notify.NotifyUpstreamAlert("warn", "查询上游商户余额解析错误", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
+			"上游Code": string(result.Data.Code),
+			"上游Msg":  fmt.Sprintf("%v", result.Data.Msg),
+		})
+		return decimal.Zero, fmt.Errorf("查询上游商户余额解析错误:%w", err)
+	}
+
+	return amount, nil
+}
+
+// 校验上游商户余额是否大于等于订单金额
+func balanceGreaterThanOrder(orderAmount string, upstreamBalance decimal.Decimal) bool {
+	amount, err := decimal.NewFromString(orderAmount)
+	if err != nil {
+		// 可记录日志或返回 false / panic，根据业务需求
+		log.Printf("提交上游交易时比较商户余额与订单金额时，订单金额转化错误: %v", err)
+		return false
+	}
+	return upstreamBalance.GreaterThanOrEqual(amount)
 }
 
 // isSuccessCode 检查响应码是否为成功（支持字符串和数字类型）
