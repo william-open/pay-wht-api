@@ -760,6 +760,7 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.CciNo = req.CciNo
 	upstreamRequest.Address = req.Address
 	upstreamRequest.DownstreamOrderNo = req.TranFlow
+	upstreamRequest.Network = req.Network
 
 	// 使用带超时的上下文
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
