@@ -76,6 +76,7 @@ type RetryConfig struct {
 }
 
 type UpstreamCfg struct {
+	BalanceApiUrl string        `mapstructure:"balanceApiUrl"`
 	ReceiveApiUrl string        `mapstructure:"receiveApiUrl"`
 	PayoutApiUrl  string        `mapstructure:"payoutApiUrl"`
 	AuthToken     string        `mapstructure:"authToken"`

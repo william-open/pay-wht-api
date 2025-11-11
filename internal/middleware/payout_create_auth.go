@@ -161,6 +161,7 @@ func PayoutCreateAuth() gin.HandlerFunc {
 			"cci_no":        req.CciNo,
 			"branch_bank":   req.BranchBank,
 			"address":       req.Address,
+			"network":       req.Network,
 			"sign":          req.Sign,
 		}
 
