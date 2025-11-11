@@ -26,4 +26,5 @@ type UpstreamSupplierDto struct {
 	RsaPrivateKey  *string `json:"rsaPrivateKey"`  // RSA私钥
 	RsaPublicKey   *string `json:"rsaPublicKey"`   // RSA公钥
 	AuthUrl        *string `json:"authUrl"`        // API请求鉴权URL
+	AgencyNo       *string `json:"agencyNo"`       // 机构号
 }
