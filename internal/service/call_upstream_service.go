@@ -184,12 +184,12 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mch
 		return "", "", "", fmt.Errorf("查询上游余额失败: %v", queryErr)
 	}
 
-	log.Printf("[Upstream-Payout] 上游余额: %.2f, 代付金额: %.2f", balance, req.Amount)
+	log.Printf("[Upstream-Payout] 上游余额: %v, 代付金额: %v", balance, req.Amount)
 	if !balanceGreaterThanOrder(req.Amount, balance) {
 		log.Printf("[Upstream-Payout] ⚠️ 上游余额不足，跳过下单")
 		notify.NotifyUpstreamAlert("warn", "代付上游余额不足", req.QueryUrl, mchReq, req, nil, map[string]string{
-			"上游余额": fmt.Sprintf("%.2f", balance),
-			"代付金额": fmt.Sprintf("%.2f", req.Amount),
+			"上游余额": fmt.Sprintf("%v", balance),
+			"代付金额": fmt.Sprintf("%v", req.Amount),
 		})
 		return "", "", "", fmt.Errorf("上游余额不足")
 	}
