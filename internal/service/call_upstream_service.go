@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"wht-order-api/internal/config"
 	"wht-order-api/internal/dto"
 	"wht-order-api/internal/notify"
@@ -255,7 +256,7 @@ func CallUpstreamPayoutService(ctx context.Context, req dto.UpstreamRequest, mch
 	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
 }
 
-// CheckUpstreamBalance 查询上游余额接口
+// CheckUpstreamBalance 查询上游余额接口（支持重试 + 超时 + 报警）
 func CheckUpstreamBalance(ctx context.Context, req dto.UpstreamRequest, mchReq *dto.CreatePayoutOrderReq) (decimal.Decimal, error) {
 	upstreamBalanceUrl := config.C.Upstream.BalanceApiUrl
 	if upstreamBalanceUrl == "" {
@@ -271,40 +272,99 @@ func CheckUpstreamBalance(ctx context.Context, req dto.UpstreamRequest, mchReq *
 		"payMethod":   req.PayMethod,
 	}
 
-	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamBalanceUrl, params)
+	var (
+		resp string
+		err  error
+	)
+
+	// =============== (1) 带重试机制的请求 ===============
+	const maxRetry = 3
+	for attempt := 1; attempt <= maxRetry; attempt++ {
+		// 每次请求设置独立的超时上下文（连接 + 响应超时）
+		ctxTimeout, cancel := context.WithTimeout(ctx, 8*time.Second)
+		resp, err = utils.HttpPostJsonWithContext(ctxTimeout, upstreamBalanceUrl, params)
+		cancel()
+
+		if err == nil && strings.TrimSpace(resp) != "" {
+			break
+		}
+
+		log.Printf("[Upstream-Query-Balance] ⚠️ 第 %d 次请求失败: %v", attempt, err)
+		time.Sleep(time.Duration(attempt*2) * time.Second) // 指数退避等待
+	}
+
 	if err != nil {
+		notify.NotifyUpstreamAlert("error", "请求上游余额接口失败", upstreamBalanceUrl, mchReq, params, nil, map[string]string{
+			"Error": err.Error(),
+		})
 		return decimal.Zero, fmt.Errorf("请求上游余额接口失败: %v", err)
 	}
 
+	// =============== (2) 解析上游响应 ===============
 	var result struct {
 		Code utils.StringOrNumber `json:"code"`
 		Msg  utils.FlexibleMsg    `json:"msg"`
 		Data struct {
-			Amount          string               `json:"amount"`
-			FrozenAmount    string               `json:"frozenAmount"`
-			AvailableAmount string               `json:"availableAmount"`
-			Code            utils.StringOrNumber `json:"code"` // code编码 实际判断的字段
-			Msg             utils.FlexibleMsg    `json:"msg"`  // 上游返回错误信息
+			Amount          utils.StringOrNumber `json:"amount"`
+			FrozenAmount    utils.StringOrNumber `json:"frozenAmount"`
+			AvailableAmount utils.StringOrNumber `json:"availableAmount"`
+			Code            utils.StringOrNumber `json:"code"`
+			Msg             utils.FlexibleMsg    `json:"msg"`
 		} `json:"data"`
 	}
 
 	if err := json.Unmarshal([]byte(resp), &result); err != nil {
+		notify.NotifyUpstreamAlert("error", "解析上游余额响应失败", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
+			"Error": err.Error(),
+		})
 		return decimal.Zero, fmt.Errorf("解析上游余额响应失败: %v", err)
 	}
 
-	if !isSuccessCode(string(result.Code)) || string(result.Data.Code) != "0" {
-		return decimal.Zero, fmt.Errorf("上游返回错误: %v", result.Msg)
+	// =============== (3) 状态码判断 ===============
+	codeStr := strings.TrimSpace(string(result.Code))
+	dataCodeStr := strings.TrimSpace(string(result.Data.Code))
+	effectiveCode := dataCodeStr
+	if effectiveCode == "" {
+		effectiveCode = codeStr
 	}
-	amount, err := decimal.NewFromString(result.Data.AvailableAmount)
-	if err != nil {
-		log.Printf("[Upstream-Query-Balance] 查询上游商户余额解析错误: amount=%v, msg=%v", amount, err)
-		notify.NotifyUpstreamAlert("warn", "查询上游商户余额解析错误", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
-			"上游Code": string(result.Data.Code),
-			"上游Msg":  fmt.Sprintf("%v", result.Data.Msg),
-		})
-		return decimal.Zero, fmt.Errorf("查询上游商户余额解析错误:%w", err)
+	isOK := isSuccessCode(effectiveCode) || effectiveCode == "0"
+
+	msg := strings.TrimSpace(result.Data.Msg.Text)
+	if msg == "" {
+		msg = strings.TrimSpace(result.Msg.Text)
 	}
 
+	if !isOK {
+		notify.NotifyUpstreamAlert("warn", "上游返回错误", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
+			"上游Code": effectiveCode,
+			"上游Msg":  msg,
+		})
+		return decimal.Zero, fmt.Errorf("上游返回错误: code=%s, msg=%s", effectiveCode, msg)
+	}
+
+	// =============== (4) 解析余额 ===============
+	availableStr := strings.TrimSpace(string(result.Data.AvailableAmount))
+	if availableStr == "" {
+		notify.NotifyUpstreamAlert("warn", "上游返回可用余额为空", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
+			"上游Code": effectiveCode,
+			"上游Msg":  msg,
+		})
+		return decimal.Zero, fmt.Errorf("上游返回可用余额为空")
+	}
+
+	amount, err := decimal.NewFromString(availableStr)
+	if err != nil {
+		log.Printf("[Upstream-Query-Balance] ❌ 余额解析错误: %v, 原始值=%v", err, availableStr)
+		notify.NotifyUpstreamAlert("warn", "上游商户余额解析错误", upstreamBalanceUrl, mchReq, params, resp, map[string]string{
+			"上游Code": effectiveCode,
+			"上游Msg":  msg,
+			"原始值":    availableStr,
+		})
+		return decimal.Zero, fmt.Errorf("解析上游余额错误:%w", err)
+	}
+
+	// =============== (5) 成功日志 ===============
+	log.Printf("[Upstream-Query-Balance] ✅ 上游余额查询成功: %s", amount.String())
 	return amount, nil
 }
 
