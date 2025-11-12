@@ -268,6 +268,7 @@ func CheckUpstreamBalance(ctx context.Context, req dto.UpstreamRequest, mchReq *
 		"providerKey": req.ProviderKey,
 		"mode":        "balance",
 		"currency":    req.Currency,
+		"payMethod":   req.PayMethod,
 	}
 
 	resp, err := utils.HttpPostJsonWithContext(ctx, upstreamBalanceUrl, params)
