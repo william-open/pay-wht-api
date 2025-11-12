@@ -240,7 +240,7 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 
 	// 10 创建订单
 	now := time.Now()
-	order, tx, err := s.createTransaction(merchant, req, single, amount, orderId, now, settle)
+	order, _, err := s.createTransaction(merchant, req, single, orderId, now, settle)
 	if err != nil {
 		return resp, err
 	}
@@ -249,7 +249,7 @@ func (s *ReassignOrderService) Create(req dto.CreateReassignOrderReq) (resp dto.
 	singleProduct := single
 	var lastErr error
 
-	_, err = s.callUpstreamService(merchant, &req, &singleProduct, tx.UpOrderId, order)
+	_, err = s.callUpstreamService(merchant, &req, &singleProduct, order)
 	if err != nil {
 		// 失败
 		s.recordUpstreamFail(
@@ -465,7 +465,6 @@ func (s *ReassignOrderService) callUpstreamService(
 	merchant *mainmodel.Merchant,
 	req *dto.CreateReassignOrderReq,
 	payChannelProduct *dto.PayProductVo,
-	txId uint64,
 	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	// 空指针检查
@@ -480,9 +479,9 @@ func (s *ReassignOrderService) callUpstreamService(
 	}
 
 	// 使用 singleflight 防止重复调用上游
-	key := fmt.Sprintf("upstream:%s:%d", req.TranFlow, txId)
+	key := fmt.Sprintf("upstream:%s:%d", req.TranFlow, order.UpOrderID)
 	result, err, _ := s.upstreamGroup.Do(key, func() (interface{}, error) {
-		return s.callUpstreamServiceInternal(merchant, req, payChannelProduct, txId, order)
+		return s.callUpstreamServiceInternal(merchant, req, payChannelProduct, order)
 	})
 
 	if err != nil {
@@ -496,7 +495,6 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	merchant *mainmodel.Merchant,
 	req *dto.CreateReassignOrderReq,
 	payChannelProduct *dto.PayProductVo,
-	txId uint64,
 	order *ordermodel.MerchantPayOutOrderM,
 ) (string, error) {
 	var bankName, bankCode string
@@ -525,11 +523,12 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	}
 
 	var upstreamRequest dto.UpstreamRequest
+	trxMchOrderId := *order.UpOrderID
 	upstreamRequest.Currency = payChannelProduct.Currency
 	upstreamRequest.Amount = req.Amount
 	upstreamRequest.PayType = req.PayType
 	upstreamRequest.ProviderKey = payChannelProduct.InterfaceCode
-	upstreamRequest.MchOrderId = strconv.FormatUint(txId, 10)
+	upstreamRequest.MchOrderId = strconv.FormatUint(trxMchOrderId, 10)
 	upstreamRequest.ApiKey = merchant.ApiKey
 	upstreamRequest.MchNo = payChannelProduct.UpAccount
 	upstreamRequest.NotifyUrl = req.NotifyUrl
@@ -555,26 +554,21 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	defer cancel()
 
 	// 调用上游服务
-	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
+	_, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
 	if err != nil {
 		return "", err
 	}
 
 	// 更新上游交易订单信息
-	if mOrderId != "" {
-		mOrderIdUint, err := strconv.ParseUint(mOrderId, 10, 64)
-		if err != nil {
-			log.Printf("上游订单号转换失败: %v", err)
-		} else {
-			txTable := shard.UpOutOrderShard.GetTable(txId, time.Now())
-			upTx := dto.UpdateUpTxVo{
-				UpOrderId: mOrderIdUint,
-				UpOrderNo: upOrderNo,
-			}
+	if upOrderNo != "" {
+		txTable := shard.UpOutOrderShard.GetTable(trxMchOrderId, time.Now())
+		upTx := dto.UpdateUpTxVo{
+			UpOrderId: trxMchOrderId,
+			UpOrderNo: upOrderNo,
+		}
 
-			if err := s.orderDao.UpdateUpTx(txTable, upTx); err != nil {
-				log.Printf("更新上游交易失败: %v", err)
-			}
+		if err := s.orderDao.UpdateUpTx(txTable, upTx); err != nil {
+			log.Printf("更新上游交易失败: %v", err)
 		}
 	}
 
@@ -586,7 +580,6 @@ func (s *ReassignOrderService) createTransaction(
 	merchant *mainmodel.Merchant,
 	req dto.CreateReassignOrderReq,
 	payChannelProduct dto.PayProductVo,
-	amount decimal.Decimal,
 	orderId uint64,
 	now time.Time,
 	settle dto.SettlementResult,
