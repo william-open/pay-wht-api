@@ -80,10 +80,11 @@ type UpdateUpTxVo struct {
 }
 
 type UpdateOrderVo struct {
-	OrderId    uint64    `json:"column:orderId;primaryKey"`
-	UpOrderId  uint64    `json:"column:upOrderId"`
-	SupplierId uint64    `json:"column:supplierId"`
-	UpdateTime time.Time `json:"column:updateTime"`
+	OrderId       uint64    `json:"column:orderId;primaryKey"`
+	UpOrderId     uint64    `json:"column:upOrderId"`
+	SupplierId    uint64    `json:"column:supplierId"`
+	ReassignOrder int8      `json:"column:reassignOrder"`
+	UpdateTime    time.Time `json:"column:updateTime"`
 }
 
 // QueryAgentMerchant 查询代理商户信息

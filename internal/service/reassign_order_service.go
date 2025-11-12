@@ -803,10 +803,11 @@ func (s *ReassignOrderService) createUpstreamTx(
 
 	// 更新订单表
 	updateOrder := dto.UpdateOrderVo{
-		OrderId:    oid,
-		UpOrderId:  txId,
-		SupplierId: uint64(payChannelProduct.UpstreamId),
-		UpdateTime: now,
+		OrderId:       oid,
+		UpOrderId:     txId,
+		SupplierId:    uint64(payChannelProduct.UpstreamId),
+		ReassignOrder: 1,
+		UpdateTime:    now,
 	}
 
 	orderTable := shard.OutOrderShard.GetTable(oid, now)
