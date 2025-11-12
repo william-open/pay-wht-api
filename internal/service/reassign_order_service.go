@@ -587,11 +587,11 @@ func (s *ReassignOrderService) createTransaction(
 	req dto.CreateReassignOrderReq,
 	payChannelProduct dto.PayProductVo,
 	amount decimal.Decimal,
-	oid uint64,
+	orderId uint64,
 	now time.Time,
 	settle dto.SettlementResult,
 ) (*ordermodel.MerchantPayOutOrderM, *ordermodel.PayoutUpstreamTxM, error) {
-	log.Printf(">>创建订单: %v", oid)
+	log.Printf(">>创建代付订单，新的交易订单: %v", orderId)
 	var order *ordermodel.MerchantPayOutOrderM
 	var tx *ordermodel.PayoutUpstreamTxM
 
@@ -600,9 +600,9 @@ func (s *ReassignOrderService) createTransaction(
 		orderDao := dao.NewPayoutOrderDaoWithDB(txDB)
 
 		// 创建上游事务
-		upTx, err := s.createUpstreamTx(merchant, req, payChannelProduct, oid, now, orderDao)
+		upTx, err := s.createUpstreamTx(merchant, req, payChannelProduct, orderId, now, orderDao)
 		if err != nil {
-			return fmt.Errorf("create upstream transaction failed: %w", err)
+			return fmt.Errorf("[%v]create upstream transaction failed: %w", orderId, err)
 		}
 		tx = upTx
 		return nil
@@ -612,10 +612,10 @@ func (s *ReassignOrderService) createTransaction(
 	}
 
 	// 查询订单和上游事务 - 添加空指针检查
-	orderTable := shard.OutOrderShard.GetTable(oid, now)
-	order, err = s.orderDao.GetByOrderId(orderTable, oid)
+	orderTable := shard.OutOrderShard.GetTable(orderId, now)
+	order, err = s.orderDao.GetByOrderId(orderTable, orderId)
 	if err != nil {
-		return nil, nil, fmt.Errorf("get order failed: %w", err)
+		return nil, nil, fmt.Errorf("get order [%v] failed: %w", orderId, err)
 	}
 	if order == nil {
 		return nil, nil, errors.New("order not found after creation")
@@ -626,18 +626,18 @@ func (s *ReassignOrderService) createTransaction(
 	}
 
 	updateErr := s.orderDao.UpdateByWhere(orderTable, map[string]interface{}{
-		"order_id": oid,
+		"order_id": orderId,
 	}, map[string]interface{}{
 		"settle_snapshot": ordermodel.PayoutSettleSnapshot(orderSettle),
 	})
 
 	if updateErr != nil {
-		log.Printf("[WARN] 更新订单结算失败: table=%s, oid=%d, err=%v", orderTable, oid, updateErr)
+		log.Printf("[WARN] 更新订单结算失败: table=%s, orderId=%d, err=%v", orderTable, orderId, updateErr)
 		return nil, nil, fmt.Errorf("reassign order update order settle failed: %w", updateErr)
 	}
 
 	txTable := shard.UpOutOrderShard.GetTable(tx.UpOrderId, now)
-	tx, err = s.orderDao.GetTxByOrderId(txTable, oid)
+	tx, err = s.orderDao.GetTxByOrderId(txTable, orderId)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get transaction failed: %w", err)
 	}
@@ -812,6 +812,7 @@ func (s *ReassignOrderService) createUpstreamTx(
 	updateOrder := dto.UpdateOrderVo{
 		OrderId:    oid,
 		UpOrderId:  txId,
+		SupplierId: uint64(payChannelProduct.UpstreamId),
 		UpdateTime: now,
 	}
 
