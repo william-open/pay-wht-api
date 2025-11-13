@@ -581,7 +581,7 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	defer cancel()
 
 	// 调用上游服务
-	_, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
+	_, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, mchReq)
 	if err != nil {
 		return "", err
 	}
