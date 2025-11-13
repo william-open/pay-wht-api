@@ -63,8 +63,9 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 			"*供应商ID:* `%v`\n"+
 				"*交易订单号:* `%v`\n"+
 				"*平台订单号:* `%v`\n"+
-				"*回调IP:* `%s`\n",
-			upOrder.SupplierId, mOrderIdNum, upOrder.OrderID, msg.UpIpAddress,
+				"*回调IP:* `%s`\n"+
+				"*回调状态:* `%s`\n",
+			upOrder.SupplierId, mOrderIdNum, upOrder.OrderID, msg.UpIpAddress, s.receiveConvertStatus(msg.Status),
 		)
 		notify.Notify(system.BotChatID, "warn", title,
 			notifyMsg, true)
