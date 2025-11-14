@@ -378,7 +378,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 			Amount:      req.Amount,
 			Code:        "0", Status: "0001",
 		}
-		return resp, lastErr
+		return resp, nil
 	}
 
 	// 12 构建响应
