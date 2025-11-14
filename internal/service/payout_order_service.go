@@ -376,7 +376,7 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 			TranFlow:    req.TranFlow,
 			SysTime:     time.Now().Format(time.RFC3339),
 			Amount:      req.Amount,
-			Code:        "001",
+			Code:        "0", Status: "0001",
 		}
 		return resp, lastErr
 	}
