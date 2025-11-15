@@ -61,9 +61,10 @@ type RedisCfg struct {
 type SecurityCfg struct {
 	HMACSecret  string `mapstructure:"hmacSecret"`
 	IPWhitelist struct {
-		Global []string `yaml:"global"`
-	} `yaml:"ipWhitelist"`
+		Global []string `mapstructure:"global"`
+	} `mapstructure:"ipWhitelist"`
 }
+
 type OrderCfg struct {
 	ShardsPerMonth   int `mapstructure:"shardsPerMonth"`
 	CreateTimeoutSec int `mapstructure:"createTimeoutSec"`
@@ -131,4 +132,6 @@ func Init() {
 	if C.Order.CreateTimeoutSec <= 0 {
 		C.Order.CreateTimeoutSec = 3
 	}
+	log.Printf("全局白名单配置加载成功: %+v", C.Security.IPWhitelist.Global)
+
 }
