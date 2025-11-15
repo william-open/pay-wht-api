@@ -127,12 +127,16 @@ func PayoutCreateAuth() gin.HandlerFunc {
 		}
 		req.ClientId = clientId
 
+		// 全局白名单校验
+		globalService := service.NewGlobalWhitelistService()
 		// 验证 IP 白名单（类型 2 = 代付）
 		verifyService := service.NewVerifyIpWhitelistService()
-		if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2) {
-			msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
-			failPayoutWithTgNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
-			return
+		if !globalService.IsGlobal(clientId) {
+			if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2) {
+				msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
+				failPayoutWithTgNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
+				return
+			}
 		}
 
 		// 构造签名参数（排除 sign）

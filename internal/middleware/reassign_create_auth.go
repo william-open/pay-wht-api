@@ -116,14 +116,18 @@ func ReassignCreateAuth() gin.HandlerFunc {
 			return
 		}
 		req.ClientId = clientId
+		// 全局白名单校验
+		globalService := service.NewGlobalWhitelistService()
 		// 验证IP是否允许
 		verifyService := service.NewVerifyIpWhitelistService()
-		canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
-		if !canAccess {
-			log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
-			c.Abort()
-			return
+		if !globalService.IsGlobal(clientId) {
+			canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
+			if !canAccess {
+				log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+				c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
+				c.Abort()
+				return
+			}
 		}
 
 		// 提取参数做签名（排除 Sign 字段）

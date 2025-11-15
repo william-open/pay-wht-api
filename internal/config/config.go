@@ -59,7 +59,10 @@ type RedisCfg struct {
 	DB       int    `mapstructure:"db"`
 }
 type SecurityCfg struct {
-	HMACSecret string `mapstructure:"hmacSecret"`
+	HMACSecret  string `mapstructure:"hmacSecret"`
+	IPWhitelist struct {
+		Global []string `yaml:"global"`
+	} `yaml:"ipWhitelist"`
 }
 type OrderCfg struct {
 	ShardsPerMonth   int `mapstructure:"shardsPerMonth"`
