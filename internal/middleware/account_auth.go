@@ -2,12 +2,14 @@ package middleware
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"time"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
+	"wht-order-api/internal/service"
 	"wht-order-api/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -77,14 +79,18 @@ func AccountAuth() gin.HandlerFunc {
 		}
 
 		// 验证IP是否允许
-		//verifyService := service.NewVerifyIpWhitelistService()
-		//canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
-		//if !canAccess {
-		//	log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
-		//	c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
-		//	c.Abort()
-		//	return
-		//}
+		verifyService := service.NewVerifyIpWhitelistService()
+		// 全局白名单校验
+		globalService := service.NewGlobalWhitelistService()
+		if !globalService.IsGlobal(clientId) {
+			canAccess := verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 2)
+			if !canAccess {
+				log.Printf("IP不允许访问: %+v,IP: %v", merchant, clientId)
+				c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": fmt.Sprintf("Unauthorized,IP[%v] is not whitelisted", clientId)})
+				c.Abort()
+				return
+			}
+		}
 		// 提取参数做签名（排除 Sign 字段）
 		params := map[string]string{
 			"version":       req.Version,

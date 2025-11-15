@@ -135,16 +135,25 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			failWithNotify(c, req, http.StatusUnauthorized, "无法识别IP", utils.Error(constant.CodeUnauthorized))
 			return
 		}
-
-		// 白名单校验
+		// 全局白名单校验
+		globalService := service.NewGlobalWhitelistService()
+		//校验服务
 		verifyService := service.NewVerifyIpWhitelistService()
-		if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1) {
-			msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
-			go notify.SendTelegramMessage(merchant.TelegramGroupChatId, msg)
-			failWithNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
-			return
-		}
+		if !globalService.IsGlobal(clientId) {
+			// 白名单校验
+			if !verifyService.VerifyIpWhitelist(clientId, merchant.MerchantID, 1) {
+				msg := fmt.Sprintf("IP:%s 不在白名单内", clientId)
+				go func() {
+					err := notify.SendTelegramMessage(merchant.TelegramGroupChatId, msg)
+					if err != nil {
 
+					}
+				}()
+				failWithNotify(c, req, http.StatusUnauthorized, msg, gin.H{"code": constant.CodeIPNotWhitelisted, "msg": msg})
+				return
+			}
+		}
+		// 赋值
 		req.ClientId = clientId
 
 		// 通道是否启用
