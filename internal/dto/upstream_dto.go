@@ -23,9 +23,11 @@ type UpstreamSupplierDto struct {
 	Currency       *string `json:"currency"`       // 国家货币符号
 	ChannelCode    *string `json:"channelCode"`    // 通道对接编码
 	Md5Key         *string `json:"md5Key"`         // md5密钥
-	RsaPrivateKey  *string `json:"rsaPrivateKey"`  // RSA私钥
-	RsaPublicKey   *string `json:"rsaPublicKey"`   // RSA公钥
+	RsaPrivateKey  *string `json:"rsaPrivateKey"`  // 上游商户RSA私钥
+	RsaPublicKey   *string `json:"rsaPublicKey"`   // 上游商户RSA公钥
+	UpRsaPublicKey *string `json:"upRsaPublicKey"` //上游平台RSA公钥
 	AuthUrl        *string `json:"authUrl"`        // API请求鉴权URL
 	AgencyNo       *string `json:"agencyNo"`       // 机构号
 	PayoutKey      *string `json:"payoutKey"`      // 代付密钥
+
 }
