@@ -89,9 +89,9 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest, mc
 		Data struct {
 			Code      utils.StringOrNumber `json:"code"` //实际判断的字段
 			Msg       utils.FlexibleMsg    `json:"msg"`
-			UpOrderNo utils.StringOrNumber `json:"up_order_no"`
+			UpOrderNo string               `json:"up_order_no"`
 			PayUrl    string               `json:"pay_url"`
-			MOrderId  utils.StringOrNumber `json:"m_order_id"`
+			MOrderId  string               `json:"m_order_id"`
 		} `json:"data"`
 	}
 
@@ -122,7 +122,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest, mc
 	log.Printf("[Upstream-Receive] 收单下单成功, upOrderNo=%s, payUrl=%s, mOrderId=%s",
 		response.Data.UpOrderNo, response.Data.PayUrl, response.Data.MOrderId)
 
-	return string(response.Data.MOrderId), string(response.Data.UpOrderNo), response.Data.PayUrl, nil
+	return response.Data.MOrderId, response.Data.UpOrderNo, response.Data.PayUrl, nil
 }
 
 // CallUpstreamPayoutService 调用上游服务下单 - 代付
