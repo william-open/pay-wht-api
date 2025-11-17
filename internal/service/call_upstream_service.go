@@ -113,7 +113,7 @@ func CallUpstreamReceiveService(ctx context.Context, req dto.UpstreamRequest, mc
 		return "", "", "", fmt.Errorf("交易失败")
 	}
 
-	if response.Data.PayUrl == "" || !isValidURL(response.Data.PayUrl) {
+	if response.Data.PayUrl == "" {
 		log.Printf("[Upstream-Receive] 上游返回错误: payUrl 无效")
 		notify.NotifyUpstreamAlert("warn", "代收上游返回无效支付链接", upstreamUrl, mchReq, params, response, nil)
 		return "", "", "", fmt.Errorf("交易失败")
