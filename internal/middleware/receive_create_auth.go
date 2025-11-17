@@ -26,13 +26,17 @@ import (
 func failWithNotify(c *gin.Context, req dto.CreateOrderReq, code int, msg string, data interface{}) {
 	c.JSON(code, data)
 	go func() {
+		mainDao := dao.NewMainDao()
+		merchant, _ := mainDao.GetMerchant(req.MerchantNo)
 		notify.Notify(
 			system.BotChatID,
 			"warn",
 			"[代收] 调用失败",
 			fmt.Sprintf(
-				"商户号: %s\n商户单号: %s\n请求状态: 失败\n通道编码: %s\n请求IP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
-				req.MerchantNo,
+				"商户号: %v\n商户昵称: %v\n应用ID: %v\n商户单号: %s\n请求状态: 失败\n通道编码: %s\n请求IP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
+				merchant.MerchantID,
+				merchant.NickName,
+				merchant.AppId,
 				req.TranFlow,
 				req.PayType,
 				utils.GetRealClientIP(c),
