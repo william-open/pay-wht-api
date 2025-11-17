@@ -27,9 +27,9 @@ func failPayoutWithTgNotify(c *gin.Context, req dto.CreatePayoutOrderReq, httpCo
 		notify.Notify(
 			system.BotChatID,
 			"warn",
-			"[payout] 调用失败",
+			"[代付] 调用失败",
 			fmt.Sprintf(
-				"商户号: %s\n订单号: %s\n请求状态: Failed\n通道编码: %s\nIP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
+				"商户号: %s\n商户单号: %s\n请求状态: 失败\n通道编码: %s\n请求IP: %s\n错误描述: %s\n请求参数: %s\n响应参数: %s",
 				req.MerchantNo,
 				req.TranFlow,
 				req.PayType,
