@@ -760,13 +760,14 @@ func (s *PayoutOrderService) callUpstreamServiceInternal(
 	upstreamRequest.CciNo = req.CciNo
 	upstreamRequest.Address = req.Address
 	upstreamRequest.DownstreamOrderNo = req.TranFlow
+	upstreamRequest.Network = req.Network
 
 	// 使用带超时的上下文
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	defer cancel()
 
 	// 调用上游服务
-	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
+	mOrderId, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, req)
 	if err != nil {
 		return "", err
 	}

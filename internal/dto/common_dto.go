@@ -60,6 +60,7 @@ type UpstreamRequest struct {
 	CciNo             string `json:"cciNo"`                             //银行间账户
 	Address           string `json:"address"`                           //客户地址
 	DownstreamOrderNo string `json:"downstreamOrderNo"`                 //下游商户订单号
+	Network           string `json:"network"`                           //区块链网络
 
 }
 

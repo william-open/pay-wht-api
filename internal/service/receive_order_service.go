@@ -259,6 +259,11 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		return resp, lastErr
 	}
 
+	go func() {
+		table := shard.OrderShard.GetTable(order.OrderID, now)
+		dal.OrderDB.Table(table).Where("order_id = ?", order.OrderID).
+			Updates(map[string]interface{}{"pay_address": payUrl, "update_time": time.Now()})
+	}()
 	// 成功返回
 	resp = dto.CreateOrderResp{
 		TranFlow: req.TranFlow, PaySerialNo: strconv.FormatUint(oid, 10),
@@ -945,7 +950,7 @@ func (s *ReceiveOrderService) callUpstreamService(
 	defer cancel()
 
 	// 调用上游服务
-	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(ctx, upstreamRequest)
+	mOrderId, upOrderNo, payUrl, err := CallUpstreamReceiveService(ctx, upstreamRequest, req)
 	if err != nil {
 		return "", err
 	}

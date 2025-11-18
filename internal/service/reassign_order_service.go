@@ -549,12 +549,39 @@ func (s *ReassignOrderService) callUpstreamServiceInternal(
 	upstreamRequest.ClientIp = req.ClientId
 	upstreamRequest.DownstreamOrderNo = req.TranFlow
 
+	//  构造兼容的商户请求参数 (CreatePayoutOrderReq)
+	mchReq := &dto.CreatePayoutOrderReq{
+		Version:      req.Version,      // 接口版本
+		MerchantNo:   req.MerchantNo,   // 商户号
+		TranFlow:     req.TranFlow,     // 订单号
+		TranDatetime: req.TranDatetime, // 下游请求时间戳（13位）
+		Amount:       req.Amount,       // 订单金额
+		PayType:      req.PayType,      // 通道编码
+		NotifyUrl:    req.NotifyUrl,    // 回调地址
+		AccNo:        req.AccNo,        // 银行账号
+		AccName:      req.AccName,      // 收款人姓名
+		PayMethod:    req.PayMethod,    // 支付方式
+		BankCode:     req.BankCode,     // 银行编码
+		BankName:     req.BankName,     // 银行名称
+		BranchBank:   req.BranchBank,   // 支行名称
+		PayEmail:     req.PayEmail,     // 邮箱
+		PayPhone:     req.PayPhone,     // 手机号
+		IdentityType: req.IdentityType, // 证件类型
+		IdentityNum:  req.IdentityNum,  // 证件号码
+		PayProductId: req.PayProductId, // 上游产品ID（测试用）
+		Sign:         req.Sign,         // MD5签名
+		ClientId:     req.ClientId,     // 客户端IP
+		AccountType:  req.AccountType,  // 账户类型
+		CciNo:        req.CciNo,        // 银行间账户号
+		Address:      req.Address,      // 客户地址
+	}
+
 	// 使用带超时的上下文
 	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	defer cancel()
 
 	// 调用上游服务
-	_, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, merchant.MerchantID, order)
+	_, upOrderNo, _, err := CallUpstreamPayoutService(ctx, upstreamRequest, mchReq)
 	if err != nil {
 		return "", err
 	}

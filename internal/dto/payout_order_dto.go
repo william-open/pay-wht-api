@@ -27,6 +27,7 @@ type CreatePayoutOrderReq struct {
 	AccountType  string `json:"account_type"`                       //账户类型
 	CciNo        string `json:"cci_no"`                             //银行间账户
 	Address      string `json:"address"`                            //客户地址
+	Network      string `json:"network"`                            //区块链网络
 }
 
 // CreatePayoutOrderResp 创建代付订单返回数据
