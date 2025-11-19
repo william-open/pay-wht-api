@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 	"wht-order-api/internal/dao"
 	"wht-order-api/internal/dto"
@@ -130,6 +131,44 @@ func ReassignCreateAuth() gin.HandlerFunc {
 			}
 		}
 
+		// =====================================================================================
+		// 🟡【新增】虚拟货币业务 → 校验 pay_method（USDT / USDC / ...）
+		// =====================================================================================
+		if utils.IsCryptoCurrency(merchant.Currency) {
+
+			if req.PayMethod == "" {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code": 400,
+					"msg":  "虚拟币业务必须提供 pay_method",
+				})
+				c.Abort()
+				return
+			}
+
+			// 解析 payMethod 获取 币种、链、协议
+			info, err := utils.ParsePayMethod(req.PayMethod)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code": 400,
+					"msg":  fmt.Sprintf("不支持的 pay_method: %s", req.PayMethod),
+				})
+				c.Abort()
+				return
+			}
+
+			// 币种必须一致
+			if info.Currency != strings.ToUpper(merchant.Currency) {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"code": 400,
+					"msg": fmt.Sprintf(
+						"pay_method %s 和商户币种 %s 不匹配，请检查",
+						req.PayMethod, merchant.Currency,
+					),
+				})
+				c.Abort()
+				return
+			}
+		}
 		// 提取参数做签名（排除 Sign 字段）
 		params := map[string]string{
 			"version":        req.Version,

@@ -165,6 +165,41 @@ func ReceiveCreateAuth() gin.HandlerFunc {
 			failWithNotify(c, req, http.StatusUnauthorized, "通道未启用", utils.Error(constant.CodeChannelDisabled))
 			return
 		}
+		// =============================
+		// 虚拟币支付方式校验
+		// =============================
+		if utils.IsCryptoCurrency(merchant.Currency) {
+
+			if req.PayMethod == "" {
+				failWithNotify(c, req, http.StatusBadRequest,
+					"虚拟币支付方式(payMethod)不能为空",
+					gin.H{"code": constant.CodeInvalidParams, "msg": "payMethod不能为空"})
+				return
+			}
+
+			supported, ok := utils.CryptoPayMethods[strings.ToUpper(merchant.Currency)]
+			if !ok {
+				failWithNotify(c, req, http.StatusBadRequest,
+					"不支持的虚拟币币种",
+					gin.H{"code": constant.CodeInvalidParams, "msg": "不支持的虚拟币币种"})
+				return
+			}
+
+			if !utils.InArray(req.PayMethod, supported) {
+				failWithNotify(
+					c,
+					req,
+					http.StatusBadRequest,
+					fmt.Sprintf("虚拟币支付方式不支持，允许：%v", strings.Join(supported, ",")),
+					gin.H{
+						"code":                 constant.CodeInvalidParams,
+						"msg":                  "虚拟币payMethod不支持",
+						"supported_pay_method": supported,
+					},
+				)
+				return
+			}
+		}
 
 		// 验签
 		params := map[string]string{
