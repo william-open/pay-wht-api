@@ -187,9 +187,9 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 	}
 	//代付订单失败不直接给商户推送消息
 	if statusText == "FAIL" {
-		notifyMsg := fmt.Sprintf("[代付回调] 订单代付失败，不自动进行商户推送，进入人工改派流程\n交易订单号: %v\n平台订单号: %v\n商户订单号:%v\n订单状态: %s", mOrderIdNum, order.OrderID, order.MOrderID, statusText)
+		notifyMsg := fmt.Sprintf("[代付回调] 代付订单，上游支付失败，不自动进行下游商户通知推送，进入人工改派流程\n\n交易订单号: %v\n\n平台订单号: %v\n\n商户订单号:%v\n\n订单状态: %s\n", mOrderIdNum, order.OrderID, order.MOrderID, "上游支付失败")
 		log.Printf(notifyMsg)
-		notify.Notify(system.BotChatID, "warn", "[代付回调]",
+		notify.Notify(system.BotChatID, "warn", "[代付回调-人工流程]",
 			notifyMsg, true)
 		return nil
 	}
