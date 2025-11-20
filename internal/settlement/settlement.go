@@ -46,6 +46,7 @@ func (s *Settlement) DoPaySettlement(req dto.SettlementResult, mId string, order
 		Operator:    merchant.NickName,
 		Description: "商户代收",
 		Currency:    req.Currency,
+		CreateBy:    merchant.NickName,
 	}
 
 	if err := s.mainDao.CreateMoneyLog(moneyLog); err != nil {

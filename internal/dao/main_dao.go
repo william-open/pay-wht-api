@@ -317,6 +317,7 @@ func (d *MainDao) FreezePayout(uid uint64, currency, orderNo string, mOrderNo st
 			Balance:     newBalance,
 			Operator:    operator,
 			CreateTime:  time.Now(),
+			CreateBy:    operator,
 		}
 
 		if err := tx.Table("w_money_log").
@@ -392,6 +393,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mOr
 				Balance:     oldBalance,
 				Operator:    operator,
 				CreateTime:  time.Now(),
+				CreateBy:    operator,
 			}
 			if err := tx.Table("w_money_log").
 				Clauses(clause.OnConflict{DoNothing: true}).
@@ -428,6 +430,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mOr
 			Balance:     oldBalance, // 可用余额此时仍未变
 			CreateTime:  time.Now(),
 			Operator:    operator,
+			CreateBy:    operator,
 		}
 		if err := tx.Table("w_money_log").
 			Clauses(clause.OnConflict{DoNothing: true}).
@@ -448,6 +451,7 @@ func (d *MainDao) HandlePayoutCallback(uid uint64, currency, orderNo string, mOr
 			Balance:     newBalance,
 			CreateTime:  time.Now(),
 			Operator:    operator,
+			CreateBy:    operator,
 		}
 		if err := tx.Table("w_money_log").
 			Clauses(clause.OnConflict{DoNothing: true}).
@@ -507,6 +511,7 @@ func (d *MainDao) CreateMoneyLog(moneyLog dto.MoneyLog) error {
 			OldBalance:  oldBalance,
 			Balance:     oldBalance.Add(moneyLog.Money),
 			CreateTime:  time.Now(),
+			CreateBy:    moneyLog.CreateBy,
 		}
 
 		if err := tx.Table("w_money_log").
