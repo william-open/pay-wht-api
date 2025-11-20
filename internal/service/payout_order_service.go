@@ -359,10 +359,11 @@ func (s *PayoutOrderService) Create(req dto.CreatePayoutOrderReq) (resp dto.Crea
 		}
 
 		// ✅ Telegram 告警推送
-		notify.Notify(system.BotChatID, "error", "⚠️ 所有上游均失败",
+		notify.Notify(system.BotChatID, "error", "⚠️ 代付所有上游均失败",
 			fmt.Sprintf(
-				"💀 代付订单所有上游调用失败\n订单号: `%d`\n商户号: `%s`\n金额: `%s`\n通道: `%s`\n错误: `%v`\n\n当前资金已冻结，请人工处理。",
+				"💀 代付订单所有上游调用失败\n平台单号: `%d`\n商户单号: `%v`\n商户号: `%s`\n金额: `%s`\n系统通道: `%s`\n错误: `%v`\n\n当前资金已冻结，请人工处理。",
 				order.OrderID,
+				req.TranFlow,
 				req.MerchantNo,
 				req.Amount,
 				req.PayType,
