@@ -50,7 +50,8 @@ func (h *ReassignOrderHandler) ReassignOrderCreate(c *gin.Context) {
 	paySerialNo, parseErr := strconv.ParseUint(response.PaySerialNo, 10, 64)
 	if parseErr != nil {
 		log.Printf("[TraceId]: %+v,响应信息: %+v", auditCtx.TraceID, err.Error())
-		c.JSON(http.StatusOK, utils.CustomErrorWithTrace(constant.CodeSystemError, err.Error(), auditCtx.TraceID))
+		//c.JSON(http.StatusOK, utils.CustomErrorWithTrace(constant.CodeSystemError, err.Error(), auditCtx.TraceID))
+		c.JSON(http.StatusOK, utils.CustomErrorWithTrace(constant.CodeTransactionFailed, err.Error(), auditCtx.TraceID))
 		return
 	}
 	auditCtx.PlatformOrderID = paySerialNo
