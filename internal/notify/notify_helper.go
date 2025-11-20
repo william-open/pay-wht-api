@@ -54,9 +54,9 @@ func NotifyUpstreamAlert(
 	writeIf("交易单号", "mchOrderId")
 	writeIf("商户单号", "downstreamOrderNo")
 
-	// ========== 二、额外信息 ==========
+	// ========== 二、上游错误信息 ==========
 	if len(extra) > 0 {
-		sb.WriteString("\n*🧩 额外信息*\n")
+		sb.WriteString("\n*🧩 上游错误信息*\n")
 		for k, v := range extra {
 			if v != "" {
 				sb.WriteString(fmt.Sprintf("%s: %s\n", escapeMarkdown(k), escapeMarkdown(v)))
