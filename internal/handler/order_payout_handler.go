@@ -58,7 +58,8 @@ func (h *PayoutOrderPayoutHandler) PayoutOrderCreate(c *gin.Context) {
 		auditCtx.ErrorMsg = err.Error()
 		auditCtx.ResponseBody = `{"code":400,"msg":"` + err.Error() + `"}`
 		log.Printf("[TraceId]: %+v,响应信息: %+v", auditCtx.TraceID, err.Error())
-		c.JSON(http.StatusOK, utils.ErrorWithTrace(constant.CodeTransactionFailed, auditCtx.TraceID))
+		//c.JSON(http.StatusOK, utils.ErrorWithTrace(constant.CodeTransactionFailed, auditCtx.TraceID))
+		c.JSON(http.StatusOK, utils.CustomErrorWithTrace(constant.CodeTransactionFailed, err.Error(), auditCtx.TraceID))
 		return
 	}
 	paySerialNo, parseErr := strconv.ParseUint(response.PaySerialNo, 10, 64)
