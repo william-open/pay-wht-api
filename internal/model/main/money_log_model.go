@@ -12,12 +12,13 @@ type MoneyLog struct {
 	OrderNo     string          `gorm:"column:order_no;size:50;not null" json:"orderNo"`                  // 平台订单编码
 	MOrderNo    string          `gorm:"column:m_order_no;size:50;not null" json:"mOrderNo"`               // 商户订单编码
 	Type        int8            `gorm:"column:type;not null" json:"type"`                                 // 收益类型
-	Operator    string          `gorm:"column:operator;size:15;not null" json:"operator"`                 // 操作者
+	Operator    string          `gorm:"column:operator;size:30;not null" json:"operator"`                 // 操作者
 	Currency    string          `gorm:"column:currency;size:10;not null" json:"currency"`                 // 币种
 	Description string          `gorm:"column:description;size:30" json:"description"`                    // 备注
 	OldBalance  decimal.Decimal `gorm:"column:old_balance;type:decimal(13,2);not null" json:"oldBalance"` // 原始余额
 	Balance     decimal.Decimal `gorm:"column:balance;type:decimal(13,2);not null" json:"balance"`        // 变化后余额
 	CreateTime  time.Time       `gorm:"column:create_time;not null" json:"createTime"`                    // 时间戳
+	CreateBy    string          `gorm:"column:create_by;size:30;not null" json:"createBy"`                // 创建者
 }
 
 func (MoneyLog) TableName() string {

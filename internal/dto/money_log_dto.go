@@ -16,4 +16,5 @@ type MoneyLog struct {
 	OldBalance  decimal.Decimal `json:"old_balance"` // 原始余额
 	Balance     decimal.Decimal `json:"balance"`     // 变化后余额
 	CreateTime  int64           `json:"create_time"` // 时间戳
+	CreateBy    string          `json:"createBy"`    // 创建者
 }
