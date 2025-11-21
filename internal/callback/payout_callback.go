@@ -74,7 +74,13 @@ func (s *PayoutCallback) HandleUpstreamCallback(msg *dto.PayoutHyperfOrderMessag
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}
-
+	// 判断一下交易金额是否正确
+	if msg.Amount.Cmp(upOrder.Amount) != 0 {
+		notifyMsg := fmt.Sprintf("回调交易金额与订单金额不符,交易订单号: %v,平台订单号: %v,上游回调金额: %v,交易金额:%v", mOrderIdNum, upOrder.OrderID, msg.Amount, upOrder.Amount)
+		notify.Notify(system.BotChatID, "warn", "代付回调商户",
+			notifyMsg, true)
+		return fmt.Errorf(notifyMsg)
+	}
 	// 4) 更新上游订单状态
 	newStatus := s.payoutGetUpStatusMessage(msg.Status)
 	upOrder.Status = newStatus
