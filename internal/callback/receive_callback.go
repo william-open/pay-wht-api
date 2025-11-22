@@ -44,7 +44,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	mOrderIdNum, err := strconv.ParseUint(msg.MOrderID, 10, 64)
 	if err != nil {
 		notifyMsg := fmt.Sprintf("交易订单号: %v,转换失败: %+v", mOrderIdNum, err)
-		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+		notify.Notify(system.BotChatID, "warn", "代收回调异常",
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}
@@ -53,7 +53,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	var upOrder orderModel.UpstreamTx
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).First(&upOrder).Error; err != nil {
 		notifyMsg := fmt.Sprintf("系统未找到交易订单号，交易订单号: %v,平台订单号: %v,错误: %+v", mOrderIdNum, upOrder.OrderID, err)
-		notify.Notify(system.BotChatID, "warn", "代收回调商户", notifyMsg, true)
+		notify.Notify(system.BotChatID, "warn", "代收回调异常", notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}
 	// 验证上游供应商IP
@@ -84,7 +84,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	upOrder.NotifyTime = utils.PtrTime(time.Now())
 	if err := dal.OrderDB.Table(txTable).Where("up_order_id = ?", mOrderIdNum).Updates(&upOrder).Error; err != nil {
 		notifyMsg := fmt.Sprintf("更新订单交易信息失败,交易订单号: %v,平台订单号: %v,错误: %v", mOrderIdNum, upOrder.OrderID, err)
-		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+		notify.Notify(system.BotChatID, "warn", "代收回调异常",
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}
@@ -94,7 +94,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	orderTable := shard.OrderShard.GetTable(upOrder.OrderID, time.Now())
 	if err := dal.OrderDB.Table(orderTable).Where("order_id = ?", upOrder.OrderID).First(&order).Error; err != nil {
 		notifyMsg := fmt.Sprintf("平台订单号未找到,交易订单号: %v,平台订单号: %v,错误: %v", mOrderIdNum, upOrder.OrderID, err)
-		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+		notify.Notify(system.BotChatID, "warn", "代收回调异常",
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}
@@ -102,7 +102,7 @@ func (s *ReceiveCallback) HandleUpstreamCallback(msg *dto.ReceiveHyperfOrderMess
 	// 如果商户订单status状态>1,表示已经收到上游回调处理
 	if order.Status > 1 {
 		notifyMsg := fmt.Sprintf("订单状态不是待处理或者未支付状态, 不能进行其他操作流程，进入人工核查阶段。交易订单号: %v,平台订单号: %v,订单状态: %v", mOrderIdNum, upOrder.OrderID, s.receiveConvertStatus(utils.ConvertOrderStatus(order.Status)))
-		notify.Notify(system.BotChatID, "warn", "代收回调商户",
+		notify.Notify(system.BotChatID, "warn", "代收回调重复",
 			notifyMsg, true)
 		return fmt.Errorf(notifyMsg)
 	}

@@ -176,10 +176,11 @@ type ChannelInfo struct {
 }
 
 type PayProductVo struct {
-	ID              int64
-	Title           string
-	Currency        string
-	Type            int8
+	ID       int64
+	Title    string
+	Currency string
+	Type     int8
+
 	UpstreamId      int64
 	UpstreamCode    string
 	UpstreamTitle   string
@@ -196,6 +197,8 @@ type PayProductVo struct {
 	InterfacePayVerifyBank    int
 	CostRate                  decimal.Decimal
 	CostFee                   decimal.Decimal
+	HasMinFee                 int8            // 保底开关
+	MinFee                    decimal.Decimal //保底费用
 	MinAmount                 *decimal.Decimal
 	MaxAmount                 *decimal.Decimal
 	FixedAmount               string

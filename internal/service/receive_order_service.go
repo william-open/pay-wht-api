@@ -107,13 +107,13 @@ func (s *ReceiveOrderService) getUpstreamFailCount(upstreamID uint64, upstreamCo
 func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrderResp, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[PANIC] Create order panic: %v\n%s", r, debug.Stack())
+			log.Printf("[RECEIVE-PANIC] Create receive order panic: %v\n%s", r, debug.Stack())
 			notify.Notify(system.BotChatID, "error", "系统Panic", fmt.Sprintf("panic: %v", r), true)
 			resp = dto.CreateOrderResp{
 				TranFlow: req.TranFlow, Amount: req.Amount,
 				Code: "999", Status: "9999", SysTime: strconv.FormatInt(utils.GetTimestampMs(), 10),
 			}
-			err = fmt.Errorf("internal error")
+			err = fmt.Errorf("system internal error")
 		}
 	}()
 
@@ -684,6 +684,8 @@ func (s *ReceiveOrderService) calculateSettlement(merchant *mainmodel.Merchant, 
 		payChannelProduct.CostFee,
 		"agent_from_platform",
 		payChannelProduct.Currency,
+		payChannelProduct.MinFee,
+		payChannelProduct.HasMinFee,
 	)
 
 	return settle, nil

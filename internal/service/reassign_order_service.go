@@ -796,6 +796,8 @@ func (s *ReassignOrderService) calculateSettlement(merchant *mainmodel.Merchant,
 		payChannelProduct.CostFee,
 		"agent_from_platform",
 		payChannelProduct.Currency,
+		payChannelProduct.MinFee,
+		payChannelProduct.HasMinFee,
 	)
 
 	return settle, nil
