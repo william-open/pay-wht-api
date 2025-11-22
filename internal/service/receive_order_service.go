@@ -157,6 +157,9 @@ func (s *ReceiveOrderService) Create(req dto.CreateOrderReq) (resp dto.CreateOrd
 		if err != nil {
 			return resp, errors.New("admin test channel invalid")
 		}
+		if single.Status == 0 {
+			return resp, errors.New("upstream payment channels not yet open")
+		}
 		// 检查金额是否在通道允许范围内
 		orderRange := fmt.Sprintf("%v-%v", single.MinAmount, single.MaxAmount)
 		if !utils.MatchOrderRange(amount, orderRange) {
